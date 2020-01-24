@@ -1,0 +1,10 @@
+
+*.m~
+.DS_Store
+profile_results*/
+*.gif
+*.icloud
+*.png
+Presentations/*
+Paper/*
+*.mat
