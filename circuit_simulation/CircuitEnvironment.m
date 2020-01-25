@@ -1,22 +1,16 @@
 classdef CircuitEnvironment < handle
-  
   properties (Constant)
-    uid_type = AtomicCounter.value_type;
-    name_keytype = 'char';
-    Laplace = syms('s');
-    DEFAULT_SHORT_NAME = 'Component';
+    LaplaceVariable = sym('s');
   end
   properties (GetAccess=public,SetAccess=private)
-    component_uid_manager;
-    component_registry;
-    component_name_registry;
-    
-    type_uid_manager;
-    type_registry;
-    
-    node_uid_manager;
-    node_registry;
-    node_name_registry;
+    component_manager;
+    node_manager;
+    type_manager;
+  end
+  properties(Constant,Hidden)
+    ComponentName     = class(Component);
+    NodeName          = class(CircuitNode);
+    ComponentNameType = class(ComponentTypeEntry);
   end
   methods
     function self = CircuitEnvironment(varargin)
@@ -53,21 +47,29 @@ classdef CircuitEnvironment < handle
           self.(arg) = value;
         end
       end
-      self.component_uid_manager = AtomicCounter(1);%start indices at 1
-      self.type_uid_manager      = AtomicCounter(1);%start indices at 1
-      
-      self.component_registry = containers.Map('KeyType',self.uid_type    ,'ValueType','any');
-      self.node_registry      = containers.Map('KeyType',self.uid_type    ,'ValueType','any');
-      
-      self.type_registry      = containers.Map('KeyType',self.name_keytype,'ValueType','any');
-      
-      self.component_name_registry = containers.Map('KeyType',name_keytype,'ValueType','any');
-      self.node_name_registry      = containers.Map('KeyType',name_keytype,'ValueType','any');
+      self.component_manager = UniqueNamedObjectManager();
+      self.node_manager      = UniqueNamedObjectManager();
+      self.type_manager      = UniqueNamedObjectManager();
     end
     
+    function [uid] = register(self,object)
+      uid = [];
+      if isa(object,self.ComponentName)
+        uid = self.registerComponent(self,object);
+      elseif isa(object,self.NodeType)
+        uid = self.registerNode(self,object);
+      elseif isa(object,self.ComponentNameType)
+        uid = self.registerType(object);
+      else
+        warning('Attempting to register unknown type %s',class(object));
+      end
+    end
+  end
+  
+  methods(Access=private)
     function [component_uid] = registerComponent(self,component)
-      component_uid = self.component_uid_manager.next();
-      self.component_registry(component_uid) = component;
+      component.setObjectManager(self.component_manager);
+      component_uid = component.uid;
       
       %Check if this type has been encountered yet if not add it to the registry
       entry = getTypeEntryComponentUID(component_uid);
@@ -76,34 +78,33 @@ classdef CircuitEnvironment < handle
       %Add name to name registry, creating one if necessary
       self.attemptAssignComponentName(component_uid,component.name);
     end
+    function [node_uid] = registerNode(self,node)
+    end
+    function [type_uid] = registerType(self,nametype)
+    end
     
-  end
-  
-  methods(Access=private)
     function [entry] = getTypeEntryComponentUID(self,component_uid)
       entry = [];
-      if ~self.component_registry.isKey(component_uid)
+      if ~self.component_manager.registry.isKey(component_uid)
         return;
       end
-      component = self.component_registry.isKey(component_uid);
+      component = self.component_manager.registry(component_uid);
       if isempty(component)
         return;
       end
-      entry = self.getTypeEntryByName(component.type_name,component.name);
+      entry = self.getTypeEntryByComponent(component.type_name,component.type_short_name);
     end
     
     function [entry] = getTypeEntryByName(self,type_name,type_short_name)
       if nargin<3 || isempty(type_short_name)
-        type_short_name = self.DEFAULT_SHORT_NAME;
+        type_short_name = Component.type_short_name;
       end
-      if ~self.type_registry(type_name)
-        type_uid = self.type_uid_manager.next();
-        entry = ComponentTypeEntry();
+      if ~self.type_manager.name_registry(type_name)
+        entry = ComponentTypeEntry(self.type_manager,type_name);
         entry.short_name = type_short_name;
-        entry.uid = type_uid;
-        self.type_registry(type_name) = entry;
       else
-        entry = self.type_registry(type_name);
+        uid = self.type_manager.name_registry(type_name);
+        entry = self.type_manager.registry(uid);
       end
     end
   end
