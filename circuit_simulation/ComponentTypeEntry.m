@@ -2,6 +2,6 @@ classdef ComponentTypeEntry < UniqueName
     properties
         short_name = [];
         components = Set();
-        counter = AtomicCounter(1);
+        id_manager = IdManager(1);
     end
 end
