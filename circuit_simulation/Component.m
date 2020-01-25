@@ -1,7 +1,4 @@
-classdef Component < handle
-  properties (Constant,Hidden)
-    uid_type = AtomicCounter.value_type;
-  end
+classdef Component < handle & UniqueId
   properties (Hidden,SetAccess=private)
     h_env; %handle to simulation environment
     name_;
@@ -11,16 +8,11 @@ classdef Component < handle
     values;
   end
   properties (Abstract,Constant)
+    type_name;
     type_short_name;
   end
   properties (Dependent)
     name;
-  end
-  properties (GetAccess=public,SetAccess=private)
-    full_name;
-  end
-  properties (GetAccess=public,SetAccess=private,Hidden)
-    uid;
   end
   
   methods
@@ -45,11 +37,11 @@ classdef Component < handle
     end
     
     function set.name(self,name)
-      self.name_ = name;
-      if isempty(self.name_)
-        self.full_name = sprintf('<%s:%d>',class(self),self.uid);
+      if isempty(self.h_env)    
+        self.name_ = name;
       else
-        self.full_name = sprintf('<%s:%d:%s>',class(self),self.uid,self.name);
+        [out_name,~] = self.h_env.attemptAssignComponentName(self.uid,name);
+        self.name_ = out_name;
       end
     end
 
@@ -57,7 +49,6 @@ classdef Component < handle
       self.h_env = h_env;
       assert(~isempty(h_env),'New environment must be non-empty');
       self.uid = h_env.registerComponent(self);
-      self.setName(self.name);
     end
     
     function [out] = substitute(self,expr)
@@ -70,7 +61,7 @@ classdef Component < handle
   end
   
   methods (Abstract,Access=?CircuitEnvironment)
-    function [out] = addToCircuit(self,admittance_matrix) %#ok<INUSD>
+    function [out] = addToCircuitAC(self,admittance_matrix) %#ok<INUSD>
     end
   end
 end
