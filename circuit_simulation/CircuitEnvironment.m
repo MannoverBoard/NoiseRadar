@@ -50,14 +50,14 @@ classdef CircuitEnvironment < handle
       self.component_manager = UniqueNamedObjectManager();
       self.node_manager      = UniqueNamedObjectManager();
       self.type_manager      = UniqueNamedObjectManager();
+      
+      self.getTypeEntryByName(self.NodeName,NodeName.type_short_name);%register node type
     end
     
     function [uid] = register(self,object)
       uid = [];
       if isa(object,self.ComponentName)
         uid = self.registerComponent(self,object);
-      elseif isa(object,self.NodeType)
-        uid = self.registerNode(self,object);
       elseif isa(object,self.ComponentNameType)
         uid = self.registerType(object);
       else
@@ -73,14 +73,21 @@ classdef CircuitEnvironment < handle
       
       %Check if this type has been encountered yet if not add it to the registry
       entry = getTypeEntryComponentUID(component_uid);
-      entry.components.add(component_uid);
-      
-      %Add name to name registry, creating one if necessary
-      self.attemptAssignComponentName(component_uid,component.name);
+      entry.register(component_uid);
+      if isempty(component.raw_name)
+        component.name = entry.getDefaultName(component_uid);
+      end
     end
+    
     function [node_uid] = registerNode(self,node)
-    end
-    function [type_uid] = registerType(self,nametype)
+      node.setObjectManager(self.node_manager);
+      node_uid = node.uid;
+      
+      entry = getTypeEntryByName(class(node));
+      entry.register(component_uid);
+      if isempty(node.raw_name)
+        node.name = entry.getDefaultName(node_uid);
+      end
     end
     
     function [entry] = getTypeEntryComponentUID(self,component_uid)
@@ -150,9 +157,9 @@ classdef CircuitEnvironment < handle
     function [out] = isValidName(name)
       out = isempty(regexp(name,'[^-a-zA-Z0-9_]','once'));
     end
-    
-    function [out] = getObjectRegistry()
-      
+    function [out] = sanitizeName(name)
+      out = regexprep(name,'[^-a-zA-Z0-9_]');
+    end
   end
 end
 
