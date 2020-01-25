@@ -4,7 +4,7 @@ classdef UniqueId < handle
     h_unique_object_manager = [];
   end
   methods
-    function [self] = UniqueId(h_unique_object_manager)
+    function [self] = UniqueId(h_unique_object_manager,varargin)
       self.h_unique_object_manager = h_unique_object_manager;
       if ~isempty(self.h_unique_object_manager)
         self.h_unique_object_manager.register(self);

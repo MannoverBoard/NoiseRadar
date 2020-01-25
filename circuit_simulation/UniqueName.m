@@ -9,7 +9,7 @@ classdef UniqueName < UniqueId
     h_unique_named_object_manager = [];
   end
   methods
-    function [self] = UniqueName(h_unique_named_object_manager,name)
+    function [self] = UniqueName(h_unique_named_object_manager,name,varargin)
       if nargin<1
         h_unique_named_object_manager = [];
       end
