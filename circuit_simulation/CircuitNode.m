@@ -1,2 +1,5 @@
-classdef CircuitNode < handle & UniqueName
+classdef CircuitNode < UniqueName
+  properties(Constant)
+    type_short_name = 'Node';
+  end
 end
