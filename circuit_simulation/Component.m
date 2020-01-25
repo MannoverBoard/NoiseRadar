@@ -11,8 +11,10 @@ classdef Component < handle & UniqueName
   
   properties (Abstract,Constant)
     type_name;
-    type_short_name;
     Connections;%prototype class to get named connections
+  end
+  properties(Constant)
+    type_short_name = 'Component';
   end
   
   methods
@@ -76,14 +78,12 @@ classdef Component < handle & UniqueName
   end
   
   methods (Abstract,Access=?CircuitEnvironment)
-    function [out] = addToCircuitAC(self,node2index,admittance_matrix) %#ok<STOUT,INUSD>
-      %Adds self to AC circuit addmittance matrix
-    end
+    %Adds self to AC circuit addmittance matrix
+    [admittance_matrix,rhs_currents] = addToCircuitAC(self,node2index,admittance_matrix,rhs_currents)  %#ok<INUSL>
   end
   methods(Abstract,Access=?Component)
-    function [self] = updateSymbols(self)
-      %Called after environment is set
-    end
+    %Called after environment is set
+    [self] = updateSymbols(self)
   end
 end
 

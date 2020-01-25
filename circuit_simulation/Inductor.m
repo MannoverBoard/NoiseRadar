@@ -27,7 +27,7 @@ classdef Inductor < Component
   end
   
   methods (Abstract,Access=?CircuitEnvironment)
-    function [admittance_matrix] = addToCircuitAC(self,indexFromNode,admittance_matrix)
+    function [admittance_matrix,rhs_currents] = addToCircuitAC(self,indexFromNode,admittance_matrix,rhs_currents)
       is_fully_connected = self.isFullyConnected();
       if ~is_fully_connected
         warning('Component:Unconnected','Component %s is not fully connected. Cannot add to circuit',self.name);
