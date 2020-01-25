@@ -1,6 +1,5 @@
-classdef ComponentTypeEntry < handle
+classdef ComponentTypeEntry < UniqueName
     properties
-        UID = [];
         short_name = [];
         components = Set();
         counter = AtomicCounter(1);
