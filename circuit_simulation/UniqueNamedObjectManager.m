@@ -2,6 +2,7 @@ classdef UniqueNamedObjectManager < UniqueObjectManager
   properties(Constant,Hidden)
     name_type = 'char';
     delimiter = ':';
+    relacement_char = '_';
   end
   properties(GetAccess=public,SetAccess=private)
     name_registry;
@@ -11,22 +12,17 @@ classdef UniqueNamedObjectManager < UniqueObjectManager
       self@UniqueObjectManager(varargin{:});  
       self.name_registry = containers.Map('KeyType',self.name_type,'ValueType',self.uid_type);
     end
-    function [object_uid,final_name] = register(self,object,names_to_try)
+    function [object_uid,final_name] = register(self,object,name)
       %assumes object is UniqueId child
       [object_uid] = register@UniqueObjectManager(self,object);
-      if nargin<3 || isempty(names_to_try)
-        names_to_try = {};
+      if nargin<3 || isempty(name)
+        name = '';
       end
-      if ~iscell(names_to_try)
-        names_to_try = {names_to_try};
-      end
-      suffix = UniqueNamedObjectManager.defaultObjectName(object_uid);
-      object.name_ = suffix;
-      self.name_registry(suffix) = object_uid;
-      final_name = suffix;
-      if ~isempty(names_to_try)
-        names_to_try = [names_to_try,cellfun(@(s)strcat(s,suffix),names_to_try,'Un',0)];
-        final_name = self.attemptRenameObject(object,names_to_try);
+      object.raw_name = '';
+      object.name_ = UniqueNamedObjectManager.defaultObjectName(object_uid);
+      self.name_registry(object.name_) = object_uid;
+      if ~isempty(name)
+        final_name = self.attemptRenameObject(object,name);
       end
     end
     function unregister(self,object)
@@ -39,49 +35,46 @@ classdef UniqueNamedObjectManager < UniqueObjectManager
       if self.name_registry.isKey(object.name)
         self.name_registry.remove(object.name);
       end
-      tmp = regexp(object.name,self.delimiter,'split');
-      object.name_ = strjoin(tmp(1:end-1),self.delimiter);
+      object.name_ = object.raw_name;
     end
-    function [final_name] = attemptRenameObject(self,object,names_to_try)
+    function [final_name] = attemptRenameObject(self,object,name)
       if ~self.registry.isKey(object.uid)
         [object_uid,~] = self.register(object);
       else
         object_uid = object.uid;
       end
-      if nargin<3 || isempty(names_to_try)
-        %Rename to empty -> rename to default unique name
-        default_name = UniqueNamedObjectManager.defaultObjectName(object_uid);
-        object.name_ = default_name;
-        self.name_registry(default_name) = object_uid;
+      if strcmp(object.name,name)
+        %ignore self sets
+        final_name=name;
         return;
       end
-      if ~iscell(names_to_try)
-        names_to_try = {names_to_try};
-      end
       old_name = object.name;
-      final_name = [];
-      for name_c = names_to_try
-        name = name_c{1};
-        if self.name_registry.isKey(name)
-          continue;
-        end
-        final_name = name;
-        self.name_registry(final_name) = object_uid;
-        object.name_ = final_name;
-        break;
-      end
-      if isempty(final_name)
-        warning('Unable to rename unique name to Object #%d',object_uid);
-        final_name = object.name;
+      default_name = UniqueNamedObjectManager.defaultObjectName(object_uid);
+      if nargin<3 || isempty(name)
+        %Rename to empty -> rename to default unique name
+        object.raw_name = '';
+        object.name_ = default_name;
       else
-        self.name_registry.remove(old_name);
+        object.raw_name = name;
+        if self.name_registry.isKey(name)
+          %already a name, append default
+          object.name_ = strcat(object.raw_name,default_name);
+        else
+          object.name_ = object.raw_name;
+        end
       end
+      self.name_registry(object.name_) = object_uid;
+      self.name_registry.remove(old_name);
+      final_name = object.name_;
     end
   end
   
   methods(Static,Hidden)
     function [name] = defaultObjectName(object_uid)
       name = sprintf('%s%d',UniqueNamedObjectManager.delimiter,object_uid);
+    end
+    function [name] = fixName(name)
+      name = regexprep(name,UniqueNamedObjectManager.delimiter,UniqueNamedObjectManager.relacement_char);
     end
   end
 end

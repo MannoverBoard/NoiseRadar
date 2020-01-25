@@ -2,6 +2,9 @@ classdef UniqueName < UniqueId
   properties(Access={?UniqueName,?UniqueNamedObjectManager},Hidden)
     name_ = '';
   end
+  properties(GetAccess=public,SetAccess=?UniqueNamedObjectManager,Hidden)
+    raw_name;
+  end
   properties(Dependent)
     name;
   end
