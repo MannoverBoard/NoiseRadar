@@ -1,10 +1,27 @@
 classdef SpiceParser < handle
   properties(Constant)
+    esc = @(X)regexptranslate('escape',X);
+    
     uid_type = 'int64';
     
+    linebreak_pattern = '[\r?\n]';
+    
+    token_delimiter = '\s*';
+    word_pattern = '[a-zA-Z_0-9]';
     comment_regex_pattern = '[*;]';
     line_continuation_pattern = '[+]';
-    token_delimiter = '\s';
+    equality_pattern = '[=]';
+    parameter_list_begin = '[(]';
+    parameter_list_end   = '[)]';
+    
+    TokenTypes = struct(...
+      'Word'          ,0,...
+      'Equality'      ,1,...
+      'Continuation'  ,2,...
+      'ParameterBegin',3,...
+      'ParameterEnd'  ,4 ...
+    );
+    TokenTypeMap = SpiceParser.getTokenTypeMap();
     
     Declarations = struct(...
       'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
@@ -50,6 +67,7 @@ classdef SpiceParser < handle
     );
     ModelTypesMap = SpiceParser.getModelTypesMap();
     SupportedModelTypesMap = SpiceParser.getSupportedModelTypesMap();
+%     model_parser = ['(' strjoin(arrayfun(@(m)SpiceParser.esc(m),SpiceParser.ModelTypesMap.Keys(),'Un',0),'|') ')'];
     
     IndepdentSourceTypes = struct('Dc',0,'Ac',1);
     IndepdentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndepdentSourceTypes);
@@ -60,7 +78,7 @@ classdef SpiceParser < handle
     
     DcSweepTypes = SpiceParser.AcSweepTypes;
     DcSweepTypesMap = SpiceParser.AcSweepTypesMap;
-    SupportedDcSweepTypesMap = SpiceParser.SupportedAcSweepTypesMap();
+    SupportedDcSweepTypesMap = SpiceParser.getSupportedDcSweepTypesMap();
     
     TransientSourceTypes = struct('Exp',0,'Pulse',1,'Pwl',2,'Sin',3);
     TransientSourceTypesMap = SpiceParser.structToMap(SpiceParser.TransientSourceTypes);
@@ -69,6 +87,7 @@ classdef SpiceParser < handle
     PrintFormatTypes = struct('M',0,'dB',1,'P',2,'R',3,'I',4);%magnitdue,dB,phase,real,imag
     PrintFormatTypesMap = SpiceParser.structToMap(SpiceParser.PrintFormatTypes);
     
+    ValueSuffixMap = SpiceParser.getValuesSuffixMap();
   end
 %   classdef Declarations
 %     enumeration 
@@ -116,11 +135,24 @@ classdef SpiceParser < handle
     %I: Imaginary part
 %   end
   methods(Static)
+    function [text] = loadFile(filename)
+      try
+       fin = open(filename,'rb');
+       text = fread(fin);
+       fclose(fin);fin=-1;
+      catch ME
+        if fin~=-1
+          fclose(fin);
+        end
+      end
+    end
     function [lines]  = parse(text)
     end
     function [tokens] = tokenize(lines)
     end
-    function [map] = getPowersMap()
+    
+    
+    function [out] = getValuesSuffixMap()
       out = containers.Map('KeyType','char','ValueType','double');
       out('f')     = 1e-15;
       out('femto') = 1e-15;
@@ -142,6 +174,16 @@ classdef SpiceParser < handle
       out('tera')  = 1e+12;
       
       out('mil')   = 25.4e-6;
+    end
+    function [out] = SpiceParser.getTokenTypeMap()
+      out = containers.Map('KeyType','char','ValueType','double');
+      TokenTypes = SpiceParser.TokenTypes;
+      out(SpiceParser.word_pattern             ) = TokenTypes.Word;
+      out(SpiceParser.comment_regex_pattern    ) = TokenTypes.Comment;
+      out(SpiceParser.equality_pattern         ) = TokenTypes.Equality;
+      out(SpiceParser.line_continuation_pattern) = TokenTypes.Continuation;
+      out(SpiceParser.parameter_list_begin     ) = TokenTypes.ParameterBegin;
+      out(SpiceParser.parameter_list_end       ) = TokenTypes.ParameterEnd;
     end
     function [out] = getDeclarationsMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
@@ -190,6 +232,7 @@ classdef SpiceParser < handle
       out('nmos') = ModelTypes.Nmos;
       out('pmos') = ModelTypes.Pmos;
     end
+    
     function [out] = getSupportedDeclarationsMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
       for key = cflat(SpiceParser.DeclarationsMap.values)
@@ -202,15 +245,28 @@ classdef SpiceParser < handle
         out(key) = 0;
       end
     end
+    function [out] = getSupportedModelTypesMap()
+      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
+      for key = cflat(SpiceParser.ModelTypesMap.values)
+        out(key) = 0;
+      end
+    end
+    
     function [out] = getSupportedAcSweepTypesMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.AcSweepTypes.values)
+      for key = cflat(SpiceParser.AcSweepTypesMap.values)
         out(key) = 0;
       end
     end
     function [out] = getSupportedDcSweepTypesMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.DcSweepTypes.values)
+      for key = cflat(SpiceParser.DcSweepTypesMap.values)
+        out(key) = 0;
+      end
+    end
+    function [out] = getSupportedTransientSourceTypesMap()
+      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
+      for key = cflat(SpiceParser.TransientSourceTypesMap.values)
         out(key) = 0;
       end
     end
