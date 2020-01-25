@@ -1,4 +1,4 @@
-function init()
+function init(varargin)
     paths_to_add = {'./utilities'};
     for pth = paths_to_add
         pth=pth{1};
