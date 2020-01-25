@@ -1,67 +1,88 @@
-classdef Component < handle & UniqueId
+classdef Component < handle & UniqueName
   properties (Hidden,SetAccess=private)
-    h_env; %handle to simulation environment
-    name_;
+    h_env = []; %handle to simulation environment
   end
+  
   properties (Access=protected)
-    symbols;
-    values;
+    symbols = [];
+    values = [];
+    connections = [];
   end
+  
   properties (Abstract,Constant)
     type_name;
     type_short_name;
-  end
-  properties (Dependent)
-    name;
+    Connections;%prototype class to get named connections
   end
   
   methods
-    function self = Component(varargin)
+    function self = Component(h_env,name,varargin)
       if nargin<2
         name = '';
-      else
-        name = varargin{2};
       end
-      if nargin<1
+      if nargin<1 || isempty(h_env)
         h_env = [];
-      else
-        h_env = varargin{1};
       end
-      self.h_env = h_env;
-      self.name_ = name;
+      self@UniqueName([],name);
       self.setEnvironment(h_env);
+      self.connectors = self.Connectors();
     end
     
-    function [name] = get.name(self)
-      name = self.name_;
-    end
-    
-    function set.name(self,name)
-      if isempty(self.h_env)    
-        self.name_ = name;
-      else
-        [out_name,~] = self.h_env.attemptAssignComponentName(self.uid,name);
-        self.name_ = out_name;
+    function [self] = setEnvironment(self,h_env)
+      if self.h_env==h_env
+        %ignore self sets
+        return;
       end
-    end
-
-    function setEnvironment(self,h_env)
+      if ~isempty(self.h_env)
+        self.h_env.unregister(self);
+      end
       self.h_env = h_env;
-      assert(~isempty(h_env),'New environment must be non-empty');
-      self.uid = h_env.registerComponent(self);
+      if ~isempty(self.h_env)
+        self.h_env.register(self);
+        self.updateSymbols();
+      end
     end
     
     function [out] = substitute(self,expr)
-      assert(numel(self.symbols)==numel(self.values),'Total number of symbols and values must be the same');
-      out = expr;
-      for i=numel(self.symbols)
-        out = subs(out,self.symbols(i),self.values(i));
+      out = subs(expr,self.symbols,self.values);
+    end
+    
+    function [out,varargout] = isFullyConnected(self)
+      % Are all connectors connected to valid nodes?
+      out = true;
+      if isempty(self.connections)
+        out = true;
+        return;
+      end
+      if isempty(self.h_env)
+        out = false;
+        return;
+      end
+      fns = fieldname(self.connections);
+      unconnected = {};
+      for fn_idx = numel(fns)
+        fn = fns{fn_idx};
+        node = self.connections.(fn);
+        if isempty(node) || ~self.h_env.node_manager.registry.isKey(node)
+          out = false;
+          unconnected{end+1} = fn; %#ok<AGROW>
+        end
+      end
+      varargout = {};
+      if nargout>=2
+        varargout{end+1} = unconnected;
       end
     end
   end
   
   methods (Abstract,Access=?CircuitEnvironment)
-    function [out] = addToCircuitAC(self,admittance_matrix) %#ok<INUSD>
+    function [out] = addToCircuitAC(self,node2index,admittance_matrix) %#ok<STOUT,INUSD>
+      %Adds self to AC circuit addmittance matrix
+    end
+  end
+  methods(Abstract,Access=?Component)
+    function [self] = updateSymbols(self)
+      %Called after environment is set
     end
   end
 end
