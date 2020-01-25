@@ -89,6 +89,9 @@ classdef Set < handle
         out = [out{:}];
       end
     end
+    function [out] = numel(self)
+      out = self.map.Count;
+    end
     function [out] = length(self)
       out = self.map.Count;
     end
