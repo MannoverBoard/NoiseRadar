@@ -21,13 +21,17 @@ classdef AtomicCounter < handle
       value = self.value_;
       next_value = self.value_+1;
       if self.value_==next_value
+        %Integer wrap
         next_value = 0;
       end
       self.value_ = next_value;
     end
 
-    function reset(self)
-      self.value_ = 0;
+    function reset(self,value)
+      if nargin<2
+        value = 0;
+      end
+      self.value_ = value;
     end
   end
 end
