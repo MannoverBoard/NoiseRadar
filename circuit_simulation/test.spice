@@ -1,0 +1,10 @@
+TITLE
+C1 3 6 1pF
+R2 6 +
+3 1k
+.DC
+;asdfasdfa
+R5 1 6 6;
+*R5 1 6 3
+*R5 1 6 6;
+.END
