@@ -35,6 +35,14 @@ classdef SpiceParser < handle
 		TokenProto = @()struct('type',[],'raw',[],'line_number',[],'start',[]);
     EmptyToken = aindex(SpiceParser.TokenProto(),[]);
     
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Declaration Information
+    DeclarationMetaType = struct(...
+      'Component', 0,...
+      'Directive', 1 ...
+    );
+    DeclarationMetaMap = SpiceParser.structToMap(SpiceParser.DeclarationMetaType);
+    
     DeclarationType = struct(...
       'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceTypes
@@ -57,6 +65,12 @@ classdef SpiceParser < handle
     SupportedDeclarationMap = SpiceParser.getSupportedDeclarationMap();
     DeclarationProto = @()struct('type',[],'directive_type',[],'tokens',[]);
     EmptyDeclaration = aindex(SpiceParser.DeclarationProto(),[]);
+    
+    DeclarationTypeInfoProto = @()struct('type',[],'name',[],'key',[],'meta_type',[],'supported',0);
+    DeclarationTypeInfoMap = SpiceParser.getDeclarationTypeInfoProto();
+    
+    % /Declaration Information
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Directive Information
@@ -629,6 +643,8 @@ classdef SpiceParser < handle
       out(SpiceParser.comment_pattern   ) = TokenType.Comment;
       assert(out.Count==numel(fieldnames(TokenType)));
     end
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Declaration Static Getters
     function [out] = getDeclarationMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
       DeclarationType = SpiceParser.DeclarationType;
@@ -649,72 +665,19 @@ classdef SpiceParser < handle
       out('l'     ) = DeclarationType.Inductor;
       assert(out.Count==numel(fieldnames(DeclarationType)));
     end
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    % Directive Static Getters
-    function [out] = getDirectiveTypeMap()
-      out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
-      DirectiveType = SpiceParser.DirectiveType;
-      %Standard Analyes
-      out('ac'   ) = DirectiveType.AcAnalysis         ;
-      out('dc'   ) = DirectiveType.DcAnalysis         ;     
-      out('four' ) = DirectiveType.FourierAnalysis    ;
-      out('noise') = DirectiveType.NoiseAnalysis      ;
-      out('op'   ) = DirectiveType.BiasPoint          ;
-      out('sens' ) = DirectiveType.SensitivityAnalysis;
-      out('tf'   ) = DirectiveType.TransferAnalysis   ;
-      out('tran' ) = DirectiveType.TransientAnalysis  ;
-      %Simple Multi-Run Analyses
-      out('step') = DirectiveType.ParametricAnalysis ;
-      out('temp') = DirectiveType.TemperatureAnalysis;
-      %Statistical Analyses
-      out('mc'   ) = DirectiveType.MonteCarloAnalysis;
-      out('wcase') = DirectiveType.WorseCaseAnalysis ;
-      %Initial Conditions
-      out('ic'      ) = DirectiveType.IntialBias;
-      out('loadbias') = DirectiveType.LoadBias  ;
-      out('nodeset' ) = DirectiveType.NodeSet   ;
-      out('savebias') = DirectiveType.SaveBias  ;
-      %Device Modeling
-      out('ends'        ) = DirectiveType.SubCircuitEnd;
-      out('distribution') = DirectiveType.Distribution ;
-      out('model'       ) = DirectiveType.Model        ;
-      out('subckt'      ) = DirectiveType.SubCircuit   ;
-      %Output Control
-      out('plot'  ) = DirectiveType.Plot  ;
-      out('print' ) = DirectiveType.Print ;
-      out('probe' ) = DirectiveType.Probe ;
-      out('vector') = DirectiveType.Vector;
-      out('watch' ) = DirectiveType.Watch ;
-      %Circuit File Processing
-      out('end'  ) = DirectiveType.End      ;
-      out('func' ) = DirectiveType.Function ;
-      out('inc'  ) = DirectiveType.Include  ;
-      out('lib'  ) = DirectiveType.Library  ;
-      out('param') = DirectiveType.Parameter;
-      %Miscellaneous
-      out('aliases'   ) = DirectiveType.Aliases        ;
-      out('endaliases') = DirectiveType.AliasesEnd     ;
-      out('external'  ) = DirectiveType.External       ;
-      out('options'   ) = DirectiveType.Options        ;
-      out('stimlib'   ) = DirectiveType.StimulusLibrary;
-      out('stimulus'  ) = DirectiveType.Stimulus       ;
-      out('text'      ) = DirectiveType.Text           ;
-      assert(out.Count==numel(fieldnames(DirectiveType)));
-    end
-    function [out] = getDirectiveTypeInfoMap()
+    function [out] = getDeclarationTypeInfoMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
-      names = fieldnames(SpiceParser.DirectiveType);
+      Type = SpiceParser.DeclarationType;
+      names = fieldnames(Type);
       typeval2name = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','char');
       for i = 1:numel(names)
         name = names{i};
-        typeval2name(SpiceParser.DirectiveType.(name)) = name;
+        typeval2name(Type.(name)) = name;
       end
-      assert(typeval2name.Count==numel(fieldnames(SpiceParser.DirectiveType)));
-      for key_c = SpiceParser.DirectiveTypeMap.keys
+      assert(typeval2name.Count==numel(fieldnames(Type)));
+      for key_c = Type.keys
         key = key_c{1};
-        typeval = SpiceParser.DirectiveTypeMap(key);
+        typeval = Type(key);
         out(typeval) = SpiceParser.DirectiveTypeInfoProto();
         entry = out(typeval);
         entry.type = typeval;
@@ -779,7 +742,173 @@ classdef SpiceParser < handle
         DirectiveType.Text            ...
       };
       assert(metatype2types.Count==numel(fieldnames(DirectiveMetaType)));
-      assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(DirectiveType)));
+      assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(Type)));
+      for key_c = metatype2types.keys
+        metatype = key_c{1};
+        for types_c = metatype2types(metatype)
+          type = types_c{1};
+          entry = out(type);
+          entry.meta_type = metatype;
+          out(type) = entry;
+        end
+      end
+%       DeclarationMetaType = struct(...
+%       'Component', 0,...
+%       'Directive', 1 ...
+%     );
+%     DeclarationMetaMap = SpiceParser.structToMap(SpiceParser.DeclarationMetaType);
+%     
+%     DeclarationType = struct(...
+%       'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
+%       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceTypes
+%       'VcVSource' ,2 ,...
+%       'VcISource' ,3 ,...
+%       'IcVSource' ,4 ,...
+%       'IcISource' ,5 ,...
+%       'Diode'     ,6 ,...
+%       'Directive' ,7 ,...
+%       'BJT'       ,8 ,...
+%       'Mosfet'    ,9 ,...
+%       'SubCircuit',10,...
+%       'User'      ,11,...
+%       'Resistor'  ,12,...
+%       'Capacitor' ,13,...
+%       'Inductor'  ,14 ...
+    );
+    end
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Directive Static Getters
+    function [out] = getDirectiveTypeMap()
+      out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
+      DirectiveType = SpiceParser.DirectiveType;
+      %Standard Analyes
+      out('ac'   ) = DirectiveType.AcAnalysis         ;
+      out('dc'   ) = DirectiveType.DcAnalysis         ;     
+      out('four' ) = DirectiveType.FourierAnalysis    ;
+      out('noise') = DirectiveType.NoiseAnalysis      ;
+      out('op'   ) = DirectiveType.BiasPoint          ;
+      out('sens' ) = DirectiveType.SensitivityAnalysis;
+      out('tf'   ) = DirectiveType.TransferAnalysis   ;
+      out('tran' ) = DirectiveType.TransientAnalysis  ;
+      %Simple Multi-Run Analyses
+      out('step') = DirectiveType.ParametricAnalysis ;
+      out('temp') = DirectiveType.TemperatureAnalysis;
+      %Statistical Analyses
+      out('mc'   ) = DirectiveType.MonteCarloAnalysis;
+      out('wcase') = DirectiveType.WorseCaseAnalysis ;
+      %Initial Conditions
+      out('ic'      ) = DirectiveType.IntialBias;
+      out('loadbias') = DirectiveType.LoadBias  ;
+      out('nodeset' ) = DirectiveType.NodeSet   ;
+      out('savebias') = DirectiveType.SaveBias  ;
+      %Device Modeling
+      out('ends'        ) = DirectiveType.SubCircuitEnd;
+      out('distribution') = DirectiveType.Distribution ;
+      out('model'       ) = DirectiveType.Model        ;
+      out('subckt'      ) = DirectiveType.SubCircuit   ;
+      %Output Control
+      out('plot'  ) = DirectiveType.Plot  ;
+      out('print' ) = DirectiveType.Print ;
+      out('probe' ) = DirectiveType.Probe ;
+      out('vector') = DirectiveType.Vector;
+      out('watch' ) = DirectiveType.Watch ;
+      %Circuit File Processing
+      out('end'  ) = DirectiveType.End      ;
+      out('func' ) = DirectiveType.Function ;
+      out('inc'  ) = DirectiveType.Include  ;
+      out('lib'  ) = DirectiveType.Library  ;
+      out('param') = DirectiveType.Parameter;
+      %Miscellaneous
+      out('aliases'   ) = DirectiveType.Aliases        ;
+      out('endaliases') = DirectiveType.AliasesEnd     ;
+      out('external'  ) = DirectiveType.External       ;
+      out('options'   ) = DirectiveType.Options        ;
+      out('stimlib'   ) = DirectiveType.StimulusLibrary;
+      out('stimulus'  ) = DirectiveType.Stimulus       ;
+      out('text'      ) = DirectiveType.Text           ;
+      assert(out.Count==numel(fieldnames(DirectiveType)));
+    end
+    function [out] = getDirectiveTypeInfoMap()
+      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
+      Type = SpiceParser.DirectiveType;
+      names = fieldnames(Type);
+      typeval2name = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','char');
+      for i = 1:numel(names)
+        name = names{i};
+        typeval2name(Type.(name)) = name;
+      end
+      assert(typeval2name.Count==numel(fieldnames(Type)));
+      for key_c = Type.keys
+        key = key_c{1};
+        typeval = Type(key);
+        out(typeval) = SpiceParser.DirectiveTypeInfoProto();
+        entry = out(typeval);
+        entry.type = typeval;
+        entry.key  = key;
+        entry.name = typeval2name(typeval);
+        out(typeval) = entry;
+      end
+      metatype2types = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
+      DirectiveMetaType = SpiceParser.DirectiveMetaType;
+      DirectiveType = SpiceParser.DirectiveType;
+      metatype2types(DirectiveMetaType.StandardAnalysis) = {...
+        DirectiveType.AcAnalysis         ,...
+        DirectiveType.DcAnalysis         ,...
+        DirectiveType.FourierAnalysis    ,...
+        DirectiveType.NoiseAnalysis      ,...
+        DirectiveType.BiasPoint          ,...
+        DirectiveType.SensitivityAnalysis,...
+        DirectiveType.TransferAnalysis   ,...
+        DirectiveType.TransientAnalysis   ...
+      };
+      metatype2types(DirectiveMetaType.MultiRunAnalysis) = {...
+        DirectiveType.ParametricAnalysis  ,...
+        DirectiveType.TemperatureAnalysis ...
+      };
+      metatype2types(DirectiveMetaType.StatisticalAnalysis) = {...
+        DirectiveType.MonteCarloAnalysis,...
+        DirectiveType.WorseCaseAnalysis  ...
+      };
+      metatype2types(DirectiveMetaType.InitialConditions) = {...
+        DirectiveType.IntialBias,...
+        DirectiveType.LoadBias  ,...
+        DirectiveType.NodeSet   ,...
+        DirectiveType.SaveBias   ...
+      };
+      metatype2types(DirectiveMetaType.DeviceModeling) = {...
+        DirectiveType.SubCircuitEnd,...
+        DirectiveType.Distribution ,...
+        DirectiveType.Model        ,...
+        DirectiveType.SubCircuit    ...
+      };
+      metatype2types(DirectiveMetaType.OutputControl) = {...
+        DirectiveType.Plot  ,...
+        DirectiveType.Print ,...
+        DirectiveType.Probe ,...
+        DirectiveType.Vector,...
+        DirectiveType.Watch  ...
+      };
+      metatype2types(DirectiveMetaType.FileProcessing) = {...
+        DirectiveType.End      ,...
+        DirectiveType.Function ,...
+        DirectiveType.Include  ,...
+        DirectiveType.Library  ,...
+        DirectiveType.Parameter ...
+      };
+      metatype2types(DirectiveMetaType.Miscellaneous) = {...
+        DirectiveType.Aliases        ,...
+        DirectiveType.AliasesEnd     ,...
+        DirectiveType.External       ,...
+        DirectiveType.Options        ,...
+        DirectiveType.StimulusLibrary,...
+        DirectiveType.Stimulus       ,...
+        DirectiveType.Text            ...
+      };
+      assert(metatype2types.Count==numel(fieldnames(DirectiveMetaType)));
+      assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(Type)));
       for key_c = metatype2types.keys
         metatype = key_c{1};
         for types_c = metatype2types(metatype)
