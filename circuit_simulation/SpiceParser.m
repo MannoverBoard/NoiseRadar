@@ -6,23 +6,28 @@ classdef SpiceParser < handle
     
     linebreak_pattern = '[\r?\n]';
     
+    comment_pattern = '\b[*;]\b';
+    line_continuation_pattern = '^\s*[+]';%continues from previous line
+    
     token_delimiter = '\s*';
-    word_pattern = '[a-zA-Z_0-9]';
-    comment_regex_pattern = '[*;]';
-    line_continuation_pattern = '[+]';
+    
+    word_pattern = '[-a-zA-Z_0-9+.]+';
     equality_pattern = '[=]';
     parameter_list_begin = '[(]';
     parameter_list_end   = '[)]';
     
+    identifier_pattern = '[a-zA-Z_][a-zA-Z0-9_]*';
+    
     TokenTypes = struct(...
       'Word'          ,0,...
       'Equality'      ,1,...
-      'Continuation'  ,2,...
-      'ParameterBegin',3,...
-      'ParameterEnd'  ,4 ...
+      'ParameterBegin',2,...
+      'ParameterEnd'  ,3,...
     );
     TokenTypeMap = SpiceParser.getTokenTypeMap();
-    
+    TokenTypeKeys = TokenTypeMap.keys;
+		TokenProto = @()struct('type',[],'value',[]);
+		    
     Declarations = struct(...
       'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceTypes
@@ -39,6 +44,7 @@ classdef SpiceParser < handle
     );
     DeclarationsMap = SpiceParser.getDeclarationsMap();
     SupportedDeclarationsMap = SpiceParser.getSupportedDirectivesMap();
+    DeclarationProto = @()('type',[],'tokens',[]);
     
     Directives = struct(...
       'Model' , 0,...
@@ -67,7 +73,6 @@ classdef SpiceParser < handle
     );
     ModelTypesMap = SpiceParser.getModelTypesMap();
     SupportedModelTypesMap = SpiceParser.getSupportedModelTypesMap();
-%     model_parser = ['(' strjoin(arrayfun(@(m)SpiceParser.esc(m),SpiceParser.ModelTypesMap.Keys(),'Un',0),'|') ')'];
     
     IndepdentSourceTypes = struct('Dc',0,'Ac',1);
     IndepdentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndepdentSourceTypes);
@@ -88,6 +93,7 @@ classdef SpiceParser < handle
     PrintFormatTypesMap = SpiceParser.structToMap(SpiceParser.PrintFormatTypes);
     
     ValueSuffixMap = SpiceParser.getValuesSuffixMap();
+    ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(@SpiceParser.esc,ValueSuffixMap.keys,'Un',0),'|') ')?'];
   end
 %   classdef Declarations
 %     enumeration 
@@ -135,6 +141,7 @@ classdef SpiceParser < handle
     %I: Imaginary part
 %   end
   methods(Static)
+  	
     function [text] = loadFile(filename)
       try
        fin = open(filename,'rb');
@@ -146,12 +153,57 @@ classdef SpiceParser < handle
         end
       end
     end
-    function [lines]  = parse(text)
-    end
-    function [tokens] = tokenize(lines)
+    
+    function [lines,title]  = parse(text)
+    	%Split lines
+    	lines = regexp(test,SpiceParser.token_delimiter,'split');
+    	%Remove comments
+    	lines = regexp(lines,SpiceParser.comment_pattern,'split');
+    	lines = cellfun(@(line)line{1},lines,'Un',0);
+    	%Split on line continuations
+    	lines = regexp(t,'\s*[+]','split')
+    	idx = 1; N = numel(lines)
+    	out = {};
+    	for line = lines
+    		if numel(line)==1
+    			out{end+1} = line;
+    		else
+    			out{end} = [out{end} line{2:end}];
+    		end
+   		end
+  		lines = out;
+  		%Remove empty lines
+  		lines = lines(~cellfun(@isempty,lines));
+  		title = lines{1};
+  		lines = lines(2:end);
+		end
+		
+    function [token_groups] = tokenize(lines)
+    	token_groups = regexp(lines,SpiceParser.token_delimiter,'split');
+    	token_groups = cellfun(@(tokens)tokens(~cellfun(@isempty,tokens),token_groups,'Un',0);
+    	tokens = cellfun(@(tkns)cellfun(@(tkn)SpiceParser.classifyToken(tkn),tkns,'Un',0),tokens,'Un',0);
     end
     
-    
+    function [tok] = classifyToken(token)
+    	idx = find(~cellfun(@isempty,regexp(token,SpiceParser.TokenTypeKeys)),1,'first');
+    	type = SpiceParser.TokenTypeMap(SpiceParser.TokenTypeKeys{idx});
+    	tok = TokenProto();
+    	tok.type = type;
+    	tok.value = token;
+ 		end
+ 		
+ 		function [directives,invalid] = directivesFromTokens(tokens)
+ 			directives = DirectiveProto();
+ 			directives = directives([]);
+ 			for token_group = tokens
+ 		
+ 		end
+ 		function [values] = parseValue(strs)
+ 			groups = regexp(strs,SpiceParser.ValuePattern,'tokens');
+ 			groups = cellfun(@(group)group{1},groups,'Un',0);
+ 			values = cellfun(@(group)tern(isempty(group),nan,@()str2double(group{1}).*SpiceParser.ValueSuffixMap(group{2})),groups);
+ 		end
+ 		    
     function [out] = getValuesSuffixMap()
       out = containers.Map('KeyType','char','ValueType','double');
       out('f')     = 1e-15;
@@ -174,14 +226,13 @@ classdef SpiceParser < handle
       out('tera')  = 1e+12;
       
       out('mil')   = 25.4e-6;
+      out('')      = 1.;%empty
     end
-    function [out] = SpiceParser.getTokenTypeMap()
+    function [out] = getTokenTypeMap()
       out = containers.Map('KeyType','char','ValueType','double');
       TokenTypes = SpiceParser.TokenTypes;
       out(SpiceParser.word_pattern             ) = TokenTypes.Word;
-      out(SpiceParser.comment_regex_pattern    ) = TokenTypes.Comment;
       out(SpiceParser.equality_pattern         ) = TokenTypes.Equality;
-      out(SpiceParser.line_continuation_pattern) = TokenTypes.Continuation;
       out(SpiceParser.parameter_list_begin     ) = TokenTypes.ParameterBegin;
       out(SpiceParser.parameter_list_end       ) = TokenTypes.ParameterEnd;
     end
