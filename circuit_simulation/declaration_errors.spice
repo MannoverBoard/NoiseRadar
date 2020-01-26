@@ -1,0 +1,14 @@
+Directive errors
+
+C1 3 6 1pF
+
+
+SUBCKT as asdf
+SUBCKT
+.ENDS
+.ENDS
+
+UNKNOWN DIRECTIVE
+
+.END
+

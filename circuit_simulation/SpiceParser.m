@@ -15,8 +15,8 @@ classdef SpiceParser < handle
     
     word_pattern = '[-a-zA-Z_0-9+.]+';
     equality_pattern = '[=]';
-    list_begin_pattern = '[\(]';
-    list_end_pattern   = '[\)]';
+    list_begin_pattern = [ '[' SpiceParser.esc('(') ']' ];
+    list_end_pattern   = [ '[' SpiceParser.esc(')') ']' ];
     comment_pattern = '[*;]';
     
     identifier_pattern = '[a-zA-Z_][a-zA-Z0-9_]*';
@@ -47,12 +47,15 @@ classdef SpiceParser < handle
       'BJT'       ,8 ,...
       'Mosfet'    ,9 ,...
       'SubCircuit',10,...
-      'User'      ,11 ...
+      'User'      ,11,...
+      'Resistor'  ,12,...
+      'Capacitor' ,13,...
+      'Inductor'  ,14 ...
     );
     DeclarationMap = SpiceParser.getDeclarationMap();
     DeclarationKeys = SpiceParser.DeclarationMap.keys;
     SupportedDeclarationMap = SpiceParser.getSupportedDirectiveMap();
-    DeclarationProto = @()struct('type',[],'raw',[],'tokens',[]);
+    DeclarationProto = @()struct('type',[],'tokens',[]);
     EmptyDeclaration = aindex(SpiceParser.DeclarationProto(),[]);
     
     DirectiveType = struct(...
@@ -294,30 +297,31 @@ classdef SpiceParser < handle
       end
     end
  		
- 		function [declarations,error_messages] = declarationsFromTokens(token_groups)
-      error_messages = {};
-      declarations = SpiceParser.DeclarationProto();
- 			declarations = declarations([]);
-      Word = SpiceParser.TokenType.Word;
+ 		function [declarations,errors,warnings] = declarationsFromTokens(token_groups)
+      errors   = SpiceParser.EmptyError;
+      warnings = SpiceParser.EmptyError;
+      declarations = SpiceParser.EmptyDeclaration;
+      DeclarationKeys = SpiceParser.DeclarationKeys;
+      DeclarationMap  = SpiceParser.DeclarationMap;
+      DeclarationProto = SpiceParser.DeclarationProto;
       for token_group = token_groups
         token_group = token_group{1}; %#ok<FXSET>
-        token1 = token_group(1);
-        if token1.type~=Word
-          %all lines must begin with a word token, if not then quit
-          valid = false;
-          return;
+        
+        idx = find(~cellfun(@isempty,regexpi(token_group(1).raw,DeclarationKeys,'once')),1,'first');
+        if isempty(idx) || idx<=0
+          error = SpiceParser.ErrorProto();
+          error.type = 'InvalidDeclaration';
+          error.line_number = token_group(1).line_number;
+          error.start = token_group(1).start;
+          error.message = ['Invalid declaration type ' token_group(1).raw ];
+          errors(end+1) = error; %#ok<AGROW>
+          continue;
         end
-        idx = find(~cellfun(@isempty,regexp(token1.raw,SpiceParser.DeclarationKeys)),1,'first');
-        if isempty(idx)
-          %not a valid declaration, so quit
-          valid = false;
-          return;
-        end
-        type = SpiceParser.DeclarationMap(SpiceParser.DeclarationKeys{idx});
-        declaration = SpiceParser.DeclarationProto();
+        
+        type = DeclarationMap(DeclarationKeys{idx});
+        declaration = DeclarationProto();
         declaration.type = type;
-        declaration.raw = token1.raw;
-        declaration.tokens = token_group(2:end);
+        declaration.tokens = token_group;
         declarations(end+1) = declaration; %#ok<AGROW>
       end
     end
@@ -370,11 +374,14 @@ classdef SpiceParser < handle
       out('f'     ) = DeclarationType.IcVSource;
       out('h'     ) = DeclarationType.IcISource;
       out('d'     ) = DeclarationType.Diode;
-      out('.'     ) = DeclarationType.Directive;
+      out('\.'    ) = DeclarationType.Directive;
       out('q'     ) = DeclarationType.BJT;
       out('m'     ) = DeclarationType.Mosfet;
       out('subckt') = DeclarationType.SubCircuit;
       out('y'     ) = DeclarationType.User;
+      out('r'     ) = DeclarationType.Resistor;
+      out('c'     ) = DeclarationType.Capacitor;
+      out('l'     ) = DeclarationType.Inductor;
     end
     function [out] = getDirectiveMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
