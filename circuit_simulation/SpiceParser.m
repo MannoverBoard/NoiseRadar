@@ -6,7 +6,7 @@ classdef SpiceParser < handle
     
     linebreak_pattern = '[\r?\n]';
     
-    comment_pattern = '\b[*;]\b';
+    comment_pattern = '[*;]';
     line_continuation_pattern = '^\s*[+]';%continues from previous line
     
     token_delimiter = '\s*';
@@ -18,17 +18,17 @@ classdef SpiceParser < handle
     
     identifier_pattern = '[a-zA-Z_][a-zA-Z0-9_]*';
     
-    TokenTypes = struct(...
+    TokenType = struct(...
       'Word'          ,0,...
       'Equality'      ,1,...
       'ParameterBegin',2,...
-      'ParameterEnd'  ,3,...
+      'ParameterEnd'  ,3 ...
     );
     TokenTypeMap = SpiceParser.getTokenTypeMap();
-    TokenTypeKeys = TokenTypeMap.keys;
-		TokenProto = @()struct('type',[],'value',[]);
-		    
-    Declarations = struct(...
+    TokenTypeKeys = SpiceParser.TokenTypeMap.keys;
+		TokenProto = @()struct('type',[],'raw',[]);
+		
+    DeclarationType = struct(...
       'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceTypes
       'VcVSource' ,2 ,...
@@ -42,11 +42,12 @@ classdef SpiceParser < handle
       'SubCircuit',10,...
       'User'      ,11 ...
     );
-    DeclarationsMap = SpiceParser.getDeclarationsMap();
-    SupportedDeclarationsMap = SpiceParser.getSupportedDirectivesMap();
-    DeclarationProto = @()('type',[],'tokens',[]);
+    DeclarationMap = SpiceParser.getDeclarationMap();
+    DeclarationKeys = SpiceParser.DeclarationMap.keys;
+    SupportedDeclarationMap = SpiceParser.getSupportedDirectiveMap();
+    DeclarationProto = @()struct('type',[],'raw',[],'tokens',[]);
     
-    Directives = struct(...
+    DirectiveType = struct(...
       'Model' , 0,...
       'Ends'  , 1,...
       'End'   , 2,...
@@ -58,8 +59,8 @@ classdef SpiceParser < handle
       'TranOp', 8,...
       'Print' , 9 ...
     );
-    DirectivesMap = SpiceParser.getDirectivesMap();
-    SupportedDirectivesMap = SpiceParser.getSupportedDirectivesMap();
+    DirectiveMap = SpiceParser.getDirectiveMap();
+    SupportedDirectiveMap = SpiceParser.getSupportedDirectiveMap();
 
     IndependentSourceTypes  = struct('Dc',0,'Ac',1);
     IndependentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndependentSourceTypes);
@@ -93,9 +94,9 @@ classdef SpiceParser < handle
     PrintFormatTypesMap = SpiceParser.structToMap(SpiceParser.PrintFormatTypes);
     
     ValueSuffixMap = SpiceParser.getValuesSuffixMap();
-    ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(@SpiceParser.esc,ValueSuffixMap.keys,'Un',0),'|') ')?'];
+    ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
   end
-%   classdef Declarations
+%   classdef DeclarationType
 %     enumeration 
 %       VSource 
 %        
@@ -117,7 +118,7 @@ classdef SpiceParser < handle
 %       ;%SUBCKT <SubName> <N1> <N2> ... ... 
 %     end
 %   end
-%   enumeration Directives
+%   enumeration DirectiveType
     %.Model
     %.ENDS
     %.END
@@ -143,64 +144,91 @@ classdef SpiceParser < handle
   methods(Static)
   	
     function [text] = loadFile(filename)
+      fin = -1;
       try
-       fin = open(filename,'rb');
-       text = fread(fin);
-       fclose(fin);fin=-1;
+       fin = fopen(filename,'rb');
+       text = char(fread(fin).');
+       fclose(fin);
+       fin=-1; %#ok<NASGU>
       catch ME
         if fin~=-1
           fclose(fin);
         end
+        rethrow(ME);
       end
     end
     
-    function [lines,title]  = parse(text)
+    function [lines,title]  = parseText(text)
     	%Split lines
-    	lines = regexp(test,SpiceParser.token_delimiter,'split');
-    	%Remove comments
-    	lines = regexp(lines,SpiceParser.comment_pattern,'split');
-    	lines = cellfun(@(line)line{1},lines,'Un',0);
+    	lines = regexp(text,SpiceParser.linebreak_pattern,'split');
     	%Split on line continuations
-    	lines = regexp(t,'\s*[+]','split')
-    	idx = 1; N = numel(lines)
+    	lines = regexp(lines,SpiceParser.line_continuation_pattern,'split');
     	out = {};
     	for line = lines
-    		if numel(line)==1
-    			out{end+1} = line;
+        line = line{1}; %#ok<FXSET>
+        n = numel(line);
+        if n==0
+          continue;
+        elseif n==1
+    			out(end+1) = line; %#ok<AGROW>
     		else
     			out{end} = [out{end} line{2:end}];
     		end
    		end
   		lines = out;
+    	%Remove comments
+    	lines = regexp(lines,SpiceParser.comment_pattern,'split');
+      lines = cellfun(@(line)line{1},lines,'Un',0);
   		%Remove empty lines
   		lines = lines(~cellfun(@isempty,lines));
   		title = lines{1};
   		lines = lines(2:end);
 		end
 		
-    function [token_groups] = tokenize(lines)
+    function [token_groups] = tokenizeLines(lines)
     	token_groups = regexp(lines,SpiceParser.token_delimiter,'split');
-    	token_groups = cellfun(@(tokens)tokens(~cellfun(@isempty,tokens),token_groups,'Un',0);
-    	tokens = cellfun(@(tkns)cellfun(@(tkn)SpiceParser.classifyToken(tkn),tkns,'Un',0),tokens,'Un',0);
+    	token_groups = cellfun(@(tokens)tokens(~cellfun(@isempty,tokens)),token_groups,'Un',0);
+    	token_groups = cellfun(@(tkns)cellfun(@(tkn)SpiceParser.classifyToken(tkn),tkns),token_groups,'Un',0);
     end
     
     function [tok] = classifyToken(token)
     	idx = find(~cellfun(@isempty,regexp(token,SpiceParser.TokenTypeKeys)),1,'first');
     	type = SpiceParser.TokenTypeMap(SpiceParser.TokenTypeKeys{idx});
-    	tok = TokenProto();
+    	tok = SpiceParser.TokenProto();
     	tok.type = type;
-    	tok.value = token;
+    	tok.raw = token;
  		end
  		
- 		function [directives,invalid] = directivesFromTokens(tokens)
- 			directives = DirectiveProto();
- 			directives = directives([]);
- 			for token_group = tokens
- 		
- 		end
+ 		function [declarations,valid] = declarationsFromTokens(token_groups)
+      valid = true;
+ 			declarations = SpiceParser.DeclarationProto();
+ 			declarations = declarations([]);
+      Word = SpiceParser.TokenType.Word;
+      for token_group = token_groups
+        token_group = token_group{1}; %#ok<FXSET>
+        token1 = token_group(1);
+        if token1.type~=Word
+          %all lines must begin with a word token, if not then quit
+          valid = false;
+          return;
+        end
+        idx = find(~cellfun(@isempty,regexp(token1.raw,SpiceParser.DeclarationKeys)),1,'first');
+        if isempty(idx)
+          %not a valid declaration, so quit
+          valid = false;
+          return;
+        end
+        type = SpiceParser.DeclarationMap(SpiceParser.DeclarationKeys{idx});
+        declaration = SpiceParser.DeclarationProto();
+        declaration.type = type;
+        declaration.raw = token1.raw;
+        declaration.tokens = token_group(2:end);
+        declarations(end+1) = declaration; %#ok<AGROW>
+      end
+    end
+    
  		function [values] = parseValue(strs)
- 			groups = regexp(strs,SpiceParser.ValuePattern,'tokens');
- 			groups = cellfun(@(group)group{1},groups,'Un',0);
+ 			groups = cflat(regexp(strs,SpiceParser.ValuePattern,'tokens'));
  			values = cellfun(@(group)tern(isempty(group),nan,@()str2double(group{1}).*SpiceParser.ValueSuffixMap(group{2})),groups);
  		end
  		    
@@ -230,41 +258,41 @@ classdef SpiceParser < handle
     end
     function [out] = getTokenTypeMap()
       out = containers.Map('KeyType','char','ValueType','double');
-      TokenTypes = SpiceParser.TokenTypes;
-      out(SpiceParser.word_pattern             ) = TokenTypes.Word;
-      out(SpiceParser.equality_pattern         ) = TokenTypes.Equality;
-      out(SpiceParser.parameter_list_begin     ) = TokenTypes.ParameterBegin;
-      out(SpiceParser.parameter_list_end       ) = TokenTypes.ParameterEnd;
+      TokenType = SpiceParser.TokenType;
+      out(SpiceParser.word_pattern             ) = TokenType.Word;
+      out(SpiceParser.equality_pattern         ) = TokenType.Equality;
+      out(SpiceParser.parameter_list_begin     ) = TokenType.ParameterBegin;
+      out(SpiceParser.parameter_list_end       ) = TokenType.ParameterEnd;
     end
-    function [out] = getDeclarationsMap()
+    function [out] = getDeclarationMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
-      Declarations = SpiceParser.Declarations;
-      out('v'     ) = Declarations.VSource;
-      out('i'     ) = Declarations.ISource;
-      out('e'     ) = Declarations.VcVSource;
-      out('g'     ) = Declarations.VcISource;
-      out('f'     ) = Declarations.IcVSource;
-      out('h'     ) = Declarations.IcISource;
-      out('d'     ) = Declarations.Diode;
-      out('.'     ) = Declarations.Directive;
-      out('q'     ) = Declarations.BJT;
-      out('m'     ) = Declarations.Mosfet;
-      out('subckt') = Declarations.SubCircuit;
-      out('y'     ) = Declarations.User;
+      DeclarationType = SpiceParser.DeclarationType;
+      out('v'     ) = DeclarationType.VSource;
+      out('i'     ) = DeclarationType.ISource;
+      out('e'     ) = DeclarationType.VcVSource;
+      out('g'     ) = DeclarationType.VcISource;
+      out('f'     ) = DeclarationType.IcVSource;
+      out('h'     ) = DeclarationType.IcISource;
+      out('d'     ) = DeclarationType.Diode;
+      out('.'     ) = DeclarationType.Directive;
+      out('q'     ) = DeclarationType.BJT;
+      out('m'     ) = DeclarationType.Mosfet;
+      out('subckt') = DeclarationType.SubCircuit;
+      out('y'     ) = DeclarationType.User;
     end
-    function [out] = getDirectivesMap()
+    function [out] = getDirectiveMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
-      Directives = SpiceParser.Directives;
-      out('model'  )=Directives.Model;
-      out('ends'   )=Directives.Ends;
-      out('end'    )=Directives.End;
-      out('ac'     )=Directives.Ac;
-      out('dc'     )=Directives.Dc;
-      out('tf'     )=Directives.Tf;
-      out('op'     )=Directives.Op;
-      out('tran'   )=Directives.Tran;
-      out('tran/op')=Directives.TranOp;
-      out('print'  )=Directives.Print;
+      DirectiveType = SpiceParser.DirectiveType;
+      out('model'  )=DirectiveType.Model;
+      out('ends'   )=DirectiveType.Ends;
+      out('end'    )=DirectiveType.End;
+      out('ac'     )=DirectiveType.Ac;
+      out('dc'     )=DirectiveType.Dc;
+      out('tf'     )=DirectiveType.Tf;
+      out('op'     )=DirectiveType.Op;
+      out('tran'   )=DirectiveType.Tran;
+      out('tran/op')=DirectiveType.TranOp;
+      out('print'  )=DirectiveType.Print;
     end
     function [out] = structToMap(strct)
       fns = fieldnames(strct);
@@ -284,15 +312,15 @@ classdef SpiceParser < handle
       out('pmos') = ModelTypes.Pmos;
     end
     
-    function [out] = getSupportedDeclarationsMap()
+    function [out] = getSupportedDeclarationMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.DeclarationsMap.values)
+      for key = cflat(SpiceParser.DeclarationMap.values)
         out(key) = 0;
       end
     end
-    function [out] = getSupportedDirectivesMap()
+    function [out] = getSupportedDirectiveMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.DirectivesMap.values)
+      for key = cflat(SpiceParser.DirectiveMap.values)
         out(key) = 0;
       end
     end
