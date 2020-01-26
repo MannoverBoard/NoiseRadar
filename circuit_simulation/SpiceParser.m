@@ -58,22 +58,83 @@ classdef SpiceParser < handle
     DeclarationProto = @()struct('type',[],'directive_type',[],'tokens',[]);
     EmptyDeclaration = aindex(SpiceParser.DeclarationProto(),[]);
     
-    DirectiveType = struct(...
-      'Model'        , 0,...
-      'SubCircuitEnd', 1,... %.Ends
-      'End'          , 2,...
-      'Ac'           , 3,...
-      'Dc'           , 4,...
-      'Tf'           , 5,...
-      'Op'           , 6,...
-      'Tran'         , 7,...
-      'TranOp'       , 8,...
-      'Print'        , 9 ...
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Directive Information
+    DirectiveMetaType = struct(...
+      'StandardAnalysis'   , 0,...
+      'MultiRunAnalysis'   , 1,...
+      'StatisticalAnalysis', 2,...
+      'InitialConditions'  , 3,...
+      'DeviceModeling'     , 4,...
+      'OutputControl'      , 5,...
+      'FileProcessing'     , 6,...
+      'Miscellaneous'      , 7 ...
     );
-    DirectiveMap = SpiceParser.getDirectiveMap();
-    DirectiveKeys = SpiceParser.DirectiveMap.keys;
-    SupportedDirectiveMap = SpiceParser.getSupportedDirectiveMap();
+    DirectiveMetaMap = SpiceParser.structToMap(SpiceParser.DirectiveMetaType);
     
+    DirectivePairingType = struct(...
+      'Single', 0,...
+      'Begin' , 1,...
+      'End'   , 2 ...
+    );
+    DirectivePairingTypeMap = SpiceParser.structToMap(SpiceParser.DirectivePairingType);
+    
+    DirectiveType = struct(...
+      ... %Standard Analyses
+      'AcAnalysis'          , 0,... %.AC
+      'DcAnalysis'          , 1,... %.DC
+      'FourierAnalysis'     , 2,... %.FOUR
+      'NoiseAnalysis'       , 3,... %.NOISE
+      'BiasPoint'           , 4,... %.OP
+      'SensitivityAnalysis' , 5,... %.SENS
+      'TransferAnalysis'    , 6,... %.TF
+      'TransientAnalysis'   , 7,... %.TRAN
+      ... %Simple Multi-Run Analyses
+      'ParametricAnalysis'  , 8,... %.STEP
+      'TemperatureAnalysis' , 9,... %.TEMP
+      ... %Statistical Analyses
+      'MonteCarloAnalysis'  ,10,... %.MC
+      'WorseCaseAnalysis'   ,11,... %.WCASE
+      ... %Initial Conditions
+      'IntialBias'          ,12,... %.IC
+      'LoadBias'            ,13,... %.LOADBIAS (to restore a .NODESET bias point)
+      'NodeSet'             ,14,... %.NODESET (to suggest a node voltage for bias calculation)
+      'SaveBias'            ,15,... %.SAVEBIAS (to store .NODESET bias point information)
+      ... %Device Modeling
+      'SubCircuitEnd'       ,16,... %.ENDS (subcircuit end)
+      'Distribution'        ,17,... %.DISTRIBUTION (model parameter tolerance distribution)
+      'Model'               ,18,... %.MODEL (modeled device definition)
+      'SubCircuit'          ,19,... %.SUBCKT (subcircuit beginning)
+      ... %Output Control
+      'Plot'                ,20,... %.PLOT (to send an analysis to output file, line printer format)
+      'Print'               ,21,... %.PRINT (to send an analysis table to output file)
+      'Probe'               ,22,... %.PROBE (to send simulation results to Probe data file)
+      'Vector'              ,23,... %.VECTOR (digital state output)
+      'Watch'               ,24,... %.WATCH (view numerical simulation results in progress)
+      ... %Circuit File Processing
+      'End'                 ,25,... %.END (end of circuit simulation description)
+      'Function'            ,26,... %.FUNC (expression function definition)
+      'Include'             ,27,... %.INC (include specified file)
+      'Library'             ,28,... %.LIB (reference specified library)
+      'Parameter'           ,29,... %.PARAM (parameter definition)
+      ... %Miscellaneous
+      'Aliases'             ,30,... %.ALIASES (begin alias definitions)
+      'AliasesEnd'          ,31,... %.ENDALIASES (end of alias definitions)
+      'External'            ,32,... %.EXTERNAL (to identify nets representing the outermost (or peripheral connections to the circuit being simulated)
+      'Options'             ,33,... %.OPTIONS (to set simulation limits, anlysis control parameters, and output characters)
+      'StimulusLibrary'     ,34,... %.STIMLIB (to specifiy stimulus library name contaning .STIMULUS information)
+      'Stimulus'            ,35,... %.STIMULUS (stimulus device information)
+      'Text'                ,36 ... %.TEXT (text expression, parameter, or file name used by digital devices)
+    );
+    DirectiveTypeMap = SpiceParser.getDirectiveTypeMap();
+    
+    DirectiveTypeInfoProto = @()struct('type',[],'name',[],'key',[],'meta_type',[],'reference_types',[], ...
+      'pairing_type',SpiceParser.DirectivePairingType.Single,'supported',0);
+    DirectiveTypeInfoMap = SpiceParser.getDirectiveTypeInfoMap();
+    % /Directive Information
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     ComponentProto=@()struct('name',[],'values',[],'nodes',[],'parameters',containers.Map('KeyType','char','ValueType','any'));
     
     IndependentSourceTypes  = struct('Dc',0,'Ac',1);
@@ -318,10 +379,11 @@ classdef SpiceParser < handle
       DeclarationProto = SpiceParser.DeclarationProto;
       
       DirectiveType = SpiceParser.DirectiveType;
-      DirectiveKeys = SpiceParser.DirectiveKeys;
+      DirectiveTypeKeys = cs2cell(cflat(SpiceParser.DirectiveTypeInfoMap.values).key);
       DirectivePrefix = [DeclarationPrefix DeclarationKeys{find(cflat(DeclarationMap.values)==DeclarationType.Directive,1,'first')}];
-      DirectiveKeysPatterns = cellfun(@(s)[DirectivePrefix s '$'],DirectiveKeys,'Un',0);
-      DirectiveMap  = SpiceParser.DirectiveMap;
+      DirectiveTypeKeysPatterns = cellfun(@(s)[DirectivePrefix s '$'],DirectiveTypeKeys,'Un',0);
+      DirectiveTypeMap  = SpiceParser.DirectiveTypeMap;
+      DirectiveTypeInfoMap = SpiceParser.DirectiveTypeInfoMap;
       
       for token_group = token_groups
         token_group = token_group{1}; %#ok<FXSET>
@@ -342,7 +404,7 @@ classdef SpiceParser < handle
         declaration.type = type;
         declaration.tokens = token_group;
         if declaration.type==DeclarationType.Directive
-          idx = find(~cellfun(@isempty,regexpi(token_group(1).raw,DirectiveKeysPatterns,'once')),1,'first');
+          idx = find(~cellfun(@isempty,regexpi(token_group(1).raw,DirectiveTypeKeysPatterns,'once')),1,'first');
           if isempty(idx) || idx<=0
             error = SpiceParser.ErrorProto();
             error.type = 'InvalidDirective';
@@ -352,7 +414,7 @@ classdef SpiceParser < handle
             errors(end+1) = error; %#ok<AGROW>
             continue;
           end
-          declaration.directive_type = DirectiveMap(DirectiveKeys{idx});
+          declaration.directive_type = DirectiveTypeMap(DirectiveTypeKeys{idx});
         end
         declarations(end+1) = declaration; %#ok<AGROW>
       end
@@ -439,7 +501,7 @@ classdef SpiceParser < handle
       end
       
       %If on subscircuit nesting errors and either .ENDS or SUBCKT is not supported, then remove the whole groupings
-      if( ~any_subscircuit_nesting_error && ~(SpiceParser.SupportedDeclarationMap(DeclarationType.SubCircuit) && SpiceParser.SupportedDirectiveMap(DirectiveType.SubCircuitEnd)))
+      if( ~any_subscircuit_nesting_error && ~(SpiceParser.SupportedDeclarationMap(DeclarationType.SubCircuit) && SpiceParser.SupportedDirectiveTypeMap(DirectiveType.SubCircuitEnd)))
         should_remove = zeros(size(declarations));
         in_subcircuit = false;
         subcircuit_indices = [];
@@ -471,7 +533,7 @@ classdef SpiceParser < handle
       %Remove all unsupported directives and throw warnings for each
       directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
       directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_indices);
-      unsupported_directives = directive_indices(~arrayfun(@(typ)SpiceParser.SupportedDirectiveMap(typ),directive_types));
+      unsupported_directives = directive_indices(~arrayfun(@(typ)DirectiveTypeInfoMap(typ).supported,directive_types));
       for idx=1:numel(unsupported_directives)
         idx = unsupported_directives(idx);
         warning = SpiceParser.ErrorProto();
@@ -524,7 +586,15 @@ classdef SpiceParser < handle
  			groups = cflat(regexp(strs,SpiceParser.ValuePattern,'tokens'));
  			values = cellfun(@(group)tern(isempty(group),nan,@()str2double(group{1}).*SpiceParser.ValueSuffixMap(group{2})),groups);
  		end
- 		    
+ 		
+    function [out] = structToMap(strct)
+      fns = fieldnames(strct);
+      lfns = cellfun(@lower,fns,'Un',0);
+      out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
+      for i=1:numel(fns)
+        out(lfns{i}) = strct.(fns{i});
+      end
+    end
     function [out] = getValuesSuffixMap()
       out = containers.Map('KeyType','char','ValueType','double');
       out('f')     = 1e-15;
@@ -557,6 +627,7 @@ classdef SpiceParser < handle
       out(SpiceParser.list_begin_pattern) = TokenType.ListBegin;
       out(SpiceParser.list_end_pattern  ) = TokenType.ListEnd;
       out(SpiceParser.comment_pattern   ) = TokenType.Comment;
+      assert(out.Count==numel(fieldnames(TokenType)));
     end
     function [out] = getDeclarationMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
@@ -571,34 +642,179 @@ classdef SpiceParser < handle
       out('\.'    ) = DeclarationType.Directive;
       out('q'     ) = DeclarationType.BJT;
       out('m'     ) = DeclarationType.Mosfet;
-      out('subckt') = DeclarationType.SubCircuit;
+      out('subckt') = DeclarationType.SubCircuit;%TODO this is invalid
       out('y'     ) = DeclarationType.User;
       out('r'     ) = DeclarationType.Resistor;
       out('c'     ) = DeclarationType.Capacitor;
       out('l'     ) = DeclarationType.Inductor;
+      assert(out.Count==numel(fieldnames(DeclarationType)));
     end
-    function [out] = getDirectiveMap()
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Directive Static Getters
+    function [out] = getDirectiveTypeMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
       DirectiveType = SpiceParser.DirectiveType;
-      out('model'  )=DirectiveType.Model;
-      out('ends'   )=DirectiveType.SubCircuitEnd;
-      out('end'    )=DirectiveType.End;
-      out('ac'     )=DirectiveType.Ac;
-      out('dc'     )=DirectiveType.Dc;
-      out('tf'     )=DirectiveType.Tf;
-      out('op'     )=DirectiveType.Op;
-      out('tran'   )=DirectiveType.Tran;
-      out('tran/op')=DirectiveType.TranOp;
-      out('print'  )=DirectiveType.Print;
+      %Standard Analyes
+      out('ac'   ) = DirectiveType.AcAnalysis         ;
+      out('dc'   ) = DirectiveType.DcAnalysis         ;     
+      out('four' ) = DirectiveType.FourierAnalysis    ;
+      out('noise') = DirectiveType.NoiseAnalysis      ;
+      out('op'   ) = DirectiveType.BiasPoint          ;
+      out('sens' ) = DirectiveType.SensitivityAnalysis;
+      out('tf'   ) = DirectiveType.TransferAnalysis   ;
+      out('tran' ) = DirectiveType.TransientAnalysis  ;
+      %Simple Multi-Run Analyses
+      out('step') = DirectiveType.ParametricAnalysis ;
+      out('temp') = DirectiveType.TemperatureAnalysis;
+      %Statistical Analyses
+      out('mc'   ) = DirectiveType.MonteCarloAnalysis;
+      out('wcase') = DirectiveType.WorseCaseAnalysis ;
+      %Initial Conditions
+      out('ic'      ) = DirectiveType.IntialBias;
+      out('loadbias') = DirectiveType.LoadBias  ;
+      out('nodeset' ) = DirectiveType.NodeSet   ;
+      out('savebias') = DirectiveType.SaveBias  ;
+      %Device Modeling
+      out('ends'        ) = DirectiveType.SubCircuitEnd;
+      out('distribution') = DirectiveType.Distribution ;
+      out('model'       ) = DirectiveType.Model        ;
+      out('subckt'      ) = DirectiveType.SubCircuit   ;
+      %Output Control
+      out('plot'  ) = DirectiveType.Plot  ;
+      out('print' ) = DirectiveType.Print ;
+      out('probe' ) = DirectiveType.Probe ;
+      out('vector') = DirectiveType.Vector;
+      out('watch' ) = DirectiveType.Watch ;
+      %Circuit File Processing
+      out('end'  ) = DirectiveType.End      ;
+      out('func' ) = DirectiveType.Function ;
+      out('inc'  ) = DirectiveType.Include  ;
+      out('lib'  ) = DirectiveType.Library  ;
+      out('param') = DirectiveType.Parameter;
+      %Miscellaneous
+      out('aliases'   ) = DirectiveType.Aliases        ;
+      out('endaliases') = DirectiveType.AliasesEnd     ;
+      out('external'  ) = DirectiveType.External       ;
+      out('options'   ) = DirectiveType.Options        ;
+      out('stimlib'   ) = DirectiveType.StimulusLibrary;
+      out('stimulus'  ) = DirectiveType.Stimulus       ;
+      out('text'      ) = DirectiveType.Text           ;
+      assert(out.Count==numel(fieldnames(DirectiveType)));
     end
-    function [out] = structToMap(strct)
-      fns = fieldnames(strct);
-      lfns = cellfun(@lower,fns,'Un',0);
-      out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
-      for i=1:numel(fns)
-        out(lfns{i}) = strct.(fns{i});
+    function [out] = getDirectiveTypeInfoMap()
+      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
+      names = fieldnames(SpiceParser.DirectiveType);
+      typeval2name = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','char');
+      for i = 1:numel(names)
+        name = names{i};
+        typeval2name(SpiceParser.DirectiveType.(name)) = name;
       end
+      assert(typeval2name.Count==numel(fieldnames(SpiceParser.DirectiveType)));
+      for key_c = SpiceParser.DirectiveTypeMap.keys
+        key = key_c{1};
+        typeval = SpiceParser.DirectiveTypeMap(key);
+        out(typeval) = SpiceParser.DirectiveTypeInfoProto();
+        entry = out(typeval);
+        entry.type = typeval;
+        entry.key  = key;
+        entry.name = typeval2name(typeval);
+        out(typeval) = entry;
+      end
+      metatype2types = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
+      DirectiveMetaType = SpiceParser.DirectiveMetaType;
+      DirectiveType = SpiceParser.DirectiveType;
+      metatype2types(DirectiveMetaType.StandardAnalysis) = {...
+        DirectiveType.AcAnalysis         ,...
+        DirectiveType.DcAnalysis         ,...
+        DirectiveType.FourierAnalysis    ,...
+        DirectiveType.NoiseAnalysis      ,...
+        DirectiveType.BiasPoint          ,...
+        DirectiveType.SensitivityAnalysis,...
+        DirectiveType.TransferAnalysis   ,...
+        DirectiveType.TransientAnalysis   ...
+      };
+      metatype2types(DirectiveMetaType.MultiRunAnalysis) = {...
+        DirectiveType.ParametricAnalysis  ,...
+        DirectiveType.TemperatureAnalysis ...
+      };
+      metatype2types(DirectiveMetaType.StatisticalAnalysis) = {...
+        DirectiveType.MonteCarloAnalysis,...
+        DirectiveType.WorseCaseAnalysis  ...
+      };
+      metatype2types(DirectiveMetaType.InitialConditions) = {...
+        DirectiveType.IntialBias,...
+        DirectiveType.LoadBias  ,...
+        DirectiveType.NodeSet   ,...
+        DirectiveType.SaveBias   ...
+      };
+      metatype2types(DirectiveMetaType.DeviceModeling) = {...
+        DirectiveType.SubCircuitEnd,...
+        DirectiveType.Distribution ,...
+        DirectiveType.Model        ,...
+        DirectiveType.SubCircuit    ...
+      };
+      metatype2types(DirectiveMetaType.OutputControl) = {...
+        DirectiveType.Plot  ,...
+        DirectiveType.Print ,...
+        DirectiveType.Probe ,...
+        DirectiveType.Vector,...
+        DirectiveType.Watch  ...
+      };
+      metatype2types(DirectiveMetaType.FileProcessing) = {...
+        DirectiveType.End      ,...
+        DirectiveType.Function ,...
+        DirectiveType.Include  ,...
+        DirectiveType.Library  ,...
+        DirectiveType.Parameter ...
+      };
+      metatype2types(DirectiveMetaType.Miscellaneous) = {...
+        DirectiveType.Aliases        ,...
+        DirectiveType.AliasesEnd     ,...
+        DirectiveType.External       ,...
+        DirectiveType.Options        ,...
+        DirectiveType.StimulusLibrary,...
+        DirectiveType.Stimulus       ,...
+        DirectiveType.Text            ...
+      };
+      assert(metatype2types.Count==numel(fieldnames(DirectiveMetaType)));
+      assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(DirectiveType)));
+      for key_c = metatype2types.keys
+        metatype = key_c{1};
+        for types_c = metatype2types(metatype)
+          type = types_c{1};
+          entry = out(type);
+          entry.meta_type = metatype;
+          out(type) = entry;
+        end
+      end
+      
+      DirectivePairingType = SpiceParser.DirectivePairingType;
+      entry = out(DirectiveType.SubCircuit   );
+      entry.pairing_type = DirectivePairingType.Begin;
+      entry.reference_types(end+1) = DirectiveType.SubCircuitEnd;
+      out(DirectiveType.SubCircuit) = entry;
+      
+      entry = out(DirectiveType.SubCircuitEnd   );
+      entry.pairing_type = DirectivePairingType.End  ;
+      entry.reference_types(end+1) = DirectiveType.SubCircuit;
+      out(DirectiveType.SubCircuitEnd) = entry;
+      
+      entry = out(DirectiveType.Aliases   );
+      entry.pairing_type = DirectivePairingType.Begin;
+      entry.reference_types(end+1) = DirectiveType.AliasesEnd;
+      out(DirectiveType.Aliases) = entry;
+      
+      entry = out(DirectiveType.AliasesEnd   );
+      entry.pairing_type = DirectivePairingType.End  ;
+      entry.reference_types(end+1) = DirectiveType.Aliases;
+      out(DirectiveType.AliasesEnd) = entry;
     end
+    % /Directive Static Getters
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     function [out] = getModelTypesMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
       ModelTypes = SpiceParser.ModelTypes;
@@ -607,6 +823,7 @@ classdef SpiceParser < handle
       out('pnp' ) = ModelTypes.Pnp;
       out('nmos') = ModelTypes.Nmos;
       out('pmos') = ModelTypes.Pmos;
+      assert(out.Count==numel(fieldnames(ModelTypes)));
     end
     
     function [out] = getSupportedDeclarationMap()
@@ -620,9 +837,9 @@ classdef SpiceParser < handle
       out(SpiceParser.DeclarationType.VSource)=1;
       out(SpiceParser.DeclarationType.ISource)=1;
     end
-    function [out] = getSupportedDirectiveMap()
+    function [out] = getSupportedDirectiveTypeMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.DirectiveMap.values)
+      for key = cflat(SpiceParser.DirectiveTypeMap.values)
         out(key) = 0;
       end
       out(SpiceParser.DirectiveType.SubCircuitEnd)=1;
