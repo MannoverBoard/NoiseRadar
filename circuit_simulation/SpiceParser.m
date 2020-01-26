@@ -4,7 +4,7 @@ classdef SpiceParser < handle
     
     uid_type = 'int64';
     
-    linebreak_pattern = '[\r?\n]';
+    linebreak_pattern = '(\r?\n)';
     
     line_continuation_pattern = '^\s*[+]';%continues from previous line
     
@@ -59,16 +59,16 @@ classdef SpiceParser < handle
     EmptyDeclaration = aindex(SpiceParser.DeclarationProto(),[]);
     
     DirectiveType = struct(...
-      'Model' , 0,...
-      'Ends'  , 1,...
-      'End'   , 2,...
-      'Ac'    , 3,...
-      'Dc'    , 4,...
-      'Tf'    , 5,...
-      'Op'    , 6,...
-      'Tran'  , 7,...
-      'TranOp', 8,...
-      'Print' , 9 ...
+      'Model'        , 0,...
+      'SubCircuitEnd', 1,... %.Ends
+      'End'          , 2,...
+      'Ac'           , 3,...
+      'Dc'           , 4,...
+      'Tf'           , 5,...
+      'Op'           , 6,...
+      'Tran'         , 7,...
+      'TranOp'       , 8,...
+      'Print'        , 9 ...
     );
     DirectiveMap = SpiceParser.getDirectiveMap();
     DirectiveKeys = SpiceParser.DirectiveMap.keys;
@@ -310,6 +310,7 @@ classdef SpiceParser < handle
       DeclarationMap  = SpiceParser.DeclarationMap;
       DeclarationProto = SpiceParser.DeclarationProto;
       
+      DirectiveType = SpiceParser.DirectiveType;
       DirectiveKeys = SpiceParser.DirectiveKeys;
       DirectivePrefix = [DeclarationPrefix DeclarationKeys{find(cflat(DeclarationMap.values)==DeclarationType.Directive,1,'first')}];
       DirectiveKeysPatterns = cellfun(@(s)[DirectivePrefix s '$'],DirectiveKeys,'Un',0);
@@ -349,8 +350,43 @@ classdef SpiceParser < handle
         declarations(end+1) = declaration; %#ok<AGROW>
       end
       
-      %DECLARATION RULES
-      %There must be at least one .END directive
+      %DECLARATION/DECLARATION RULES
+      %There must be at least one .END directive - Error
+      directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
+      directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_indices);
+      end_directives = (directive_types==DirectiveType.End);
+      if ~any(end_directives)
+        error = SpiceParser.ErrorProto();
+        error.type = 'MissingEndDirective';
+        error.line_number = declarations(end).tokens(end).line_number;
+        error.start = declarations(end).tokens(end).start;
+        error.message = 'All netlist files should end in a .END dirctive';
+        errors(end+1) = error;
+      end
+      
+      %All declarations after the first .END directive will be ignored - Warning
+      first_end_directive_index = directive_indices(find(end_directives,1,'first'));
+      if first_end_directive_index~=numel(declarations)
+        for idx=(first_end_directive_index+1):numel(declarations)
+          warning = SpiceParser.ErrorProto();
+          warning.type = 'DeclarationAfterEnd';
+          warning.line_number = declarations(idx).tokens(1).line_number;
+          warning.start = declarations(idx).tokens(1).start;
+          warning.message = sprintf('Declaration %s after .END directive will be ignored.',declarations(idx).tokens(1).raw);
+          warnings(end+1) = warning; %#ok<AGROW>
+        end
+      end
+      
+      %Remove .END directive and all declarations after it
+      if ~isempty(first_end_directive_index) && first_end_directive_index>=1
+        declarations = declarations(1:first_end_directive_index-1);
+      end
+      
+      %Subcircuits cannot be nested
+      
+      %All subcircuits must have a matching .ENDS
+      
+      
     end
     
  		function [values] = parseValue(strs)
@@ -414,7 +450,7 @@ classdef SpiceParser < handle
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
       DirectiveType = SpiceParser.DirectiveType;
       out('model'  )=DirectiveType.Model;
-      out('ends'   )=DirectiveType.Ends;
+      out('ends'   )=DirectiveType.SubCircuitEnd;
       out('end'    )=DirectiveType.End;
       out('ac'     )=DirectiveType.Ac;
       out('dc'     )=DirectiveType.Dc;
