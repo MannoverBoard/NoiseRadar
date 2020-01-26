@@ -16,6 +16,8 @@ C1 (( ( ;error
 C1 ))) ;error
 C1 (( ) ;error
 
+C1 ) (; error
+
 ;;;;;;;; HEY
 
 AA ( ( 

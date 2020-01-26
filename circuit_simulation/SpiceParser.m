@@ -274,11 +274,17 @@ classdef SpiceParser < handle
           end
         end
         
+        token_group(1).line_number %HACK
         %List begins and ends must nest properly
         begins = (token_types==SpiceParser.TokenType.ListBegin);
         ends   = (token_types==SpiceParser.TokenType.ListEnd  );
         level_changes = (begins-ends);
-        levels = cumsum(level_changes);
+        levels = zeros(size(level_changes));
+        levels(1) = level_changes(1);
+        for i=2:numel(levels)
+          levels(i) = max([0,levels(i-1)])+level_changes(i);
+        end
+        
         for i=find(levels<0)
           error = SpiceParser.ErrorProto();
           error.type = 'ExtraEndParenthesis';
@@ -382,10 +388,50 @@ classdef SpiceParser < handle
         declarations = declarations(1:first_end_directive_index-1);
       end
       
+      %Subcircuit Nesting Logic
+      declaration_types = [declarations.type];
+      directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
+      directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_indices);
+      ends_directives_lgc = (directive_types==DirectiveType.SubCircuitEnd);
+      ends_indices = directive_indices(ends_directives_lgc);
+      
+      begins = (declaration_types==DeclarationType.SubCircuit);
+      ends   = arrayfun(@(i)any(ends_indices==i),1:numel(declarations));
+      level_changes = (begins-ends);
+      levels = zeros(size(level_changes));
+      levels(1) = level_changes(1);
+      for i=2:numel(levels)
+        levels(i) = max([0,levels(i-1)])+level_changes(i);
+      end
+      
       %Subcircuits cannot be nested
+      for i=find(levels>1)
+        error = SpiceParser.ErrorProto();
+        error.type = 'NestedSubcircuit';
+        error.line_number = declarations(i).tokens(1).line_number;
+        error.start = declarations(i).tokens(1).start;
+        error.message = 'Subcircuit definitions cannot be nested.';
+        errors(end+1) = error; %#ok<AGROW>
+      end
       
       %All subcircuits must have a matching .ENDS
+      for i=find(levels<0)
+        error = SpiceParser.ErrorProto();
+        error.type = 'ExtraSubCircuitEnd';
+        error.line_number = declarations(i).tokens(1).line_number;
+        error.start = declarations(i).tokens(1).start;
+        error.message = 'Extra SubCircuit .ENDS  directive.';
+        errors(end+1) = error; %#ok<AGROW>
+      end
       
+      if levels(end)>0
+        error = SpiceParser.ErrorProto();
+        error.type = 'MissingSubCircuitEnd';
+        error.line_number = declarations(end).tokens(1).line_number;
+        error.start = declarations(end).tokens(1);
+        error.message = sprintf('Missing %d SubCircuit .ENDS  directive%s.',levels(end),tern(levels(end)>1,'s',''));
+        errors(end+1) = error;
+      end
       
     end
     
