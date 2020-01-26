@@ -55,7 +55,7 @@ classdef SpiceParser < handle
     DeclarationMap = SpiceParser.getDeclarationMap();
     DeclarationKeys = SpiceParser.DeclarationMap.keys;
     SupportedDeclarationMap = SpiceParser.getSupportedDirectiveMap();
-    DeclarationProto = @()struct('type',[],'tokens',[]);
+    DeclarationProto = @()struct('type',[],'directive_type',[],'tokens',[]);
     EmptyDeclaration = aindex(SpiceParser.DeclarationProto(),[]);
     
     DirectiveType = struct(...
@@ -71,6 +71,7 @@ classdef SpiceParser < handle
       'Print' , 9 ...
     );
     DirectiveMap = SpiceParser.getDirectiveMap();
+    DirectiveKeys = SpiceParser.DirectiveMap.keys;
     SupportedDirectiveMap = SpiceParser.getSupportedDirectiveMap();
 
     IndependentSourceTypes  = struct('Dc',0,'Ac',1);
@@ -298,16 +299,26 @@ classdef SpiceParser < handle
     end
  		
  		function [declarations,errors,warnings] = declarationsFromTokens(token_groups)
+      declarations = SpiceParser.EmptyDeclaration;
       errors   = SpiceParser.EmptyError;
       warnings = SpiceParser.EmptyError;
-      declarations = SpiceParser.EmptyDeclaration;
+      
+      DeclarationType = SpiceParser.DeclarationType;
       DeclarationKeys = SpiceParser.DeclarationKeys;
+      DeclarationPrefix = '^';
+      DeclarationKeyPatterns = cellfun(@(s)[DeclarationPrefix s],DeclarationKeys,'Un',0);
       DeclarationMap  = SpiceParser.DeclarationMap;
       DeclarationProto = SpiceParser.DeclarationProto;
+      
+      DirectiveKeys = SpiceParser.DirectiveKeys;
+      DirectivePrefix = [DeclarationPrefix DeclarationKeys{find(cflat(DeclarationMap.values)==DeclarationType.Directive,1,'first')}];
+      DirectiveKeysPatterns = cellfun(@(s)[DirectivePrefix s '$'],DirectiveKeys,'Un',0);
+      DirectiveMap  = SpiceParser.DirectiveMap;
+      
       for token_group = token_groups
         token_group = token_group{1}; %#ok<FXSET>
         
-        idx = find(~cellfun(@isempty,regexpi(token_group(1).raw,DeclarationKeys,'once')),1,'first');
+        idx = find(~cellfun(@isempty,regexpi(token_group(1).raw,DeclarationKeyPatterns,'once')),1,'first');
         if isempty(idx) || idx<=0
           error = SpiceParser.ErrorProto();
           error.type = 'InvalidDeclaration';
@@ -322,8 +333,24 @@ classdef SpiceParser < handle
         declaration = DeclarationProto();
         declaration.type = type;
         declaration.tokens = token_group;
+        if declaration.type==DeclarationType.Directive
+          idx = find(~cellfun(@isempty,regexpi(token_group(1).raw,DirectiveKeysPatterns,'once')),1,'first');
+          if isempty(idx) || idx<=0
+            error = SpiceParser.ErrorProto();
+            error.type = 'InvalidDirective';
+            error.line_number = token_group(1).line_number;
+            error.start = token_group(1).start;
+            error.message = ['Invalid directive type ' token_group(1).raw ];
+            errors(end+1) = error; %#ok<AGROW>
+            continue;
+          end
+          declaration.directive_type = DirectiveMap(DirectiveKeys{idx});
+        end
         declarations(end+1) = declaration; %#ok<AGROW>
       end
+      
+      %DECLARATION RULES
+      %There must be at least one .END directive
     end
     
  		function [values] = parseValue(strs)
