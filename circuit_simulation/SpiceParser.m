@@ -54,7 +54,7 @@ classdef SpiceParser < handle
     );
     DeclarationMap = SpiceParser.getDeclarationMap();
     DeclarationKeys = SpiceParser.DeclarationMap.keys;
-    SupportedDeclarationMap = SpiceParser.getSupportedDirectiveMap();
+    SupportedDeclarationMap = SpiceParser.getSupportedDeclarationMap();
     DeclarationProto = @()struct('type',[],'directive_type',[],'tokens',[]);
     EmptyDeclaration = aindex(SpiceParser.DeclarationProto(),[]);
     
@@ -73,7 +73,7 @@ classdef SpiceParser < handle
     DirectiveMap = SpiceParser.getDirectiveMap();
     DirectiveKeys = SpiceParser.DirectiveMap.keys;
     SupportedDirectiveMap = SpiceParser.getSupportedDirectiveMap();
-
+    
     IndependentSourceTypes  = struct('Dc',0,'Ac',1);
     IndependentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndependentSourceTypes);
     
@@ -274,7 +274,6 @@ classdef SpiceParser < handle
           end
         end
         
-        token_group(1).line_number %HACK
         %List begins and ends must nest properly
         begins = (token_types==SpiceParser.TokenType.ListBegin);
         ends   = (token_types==SpiceParser.TokenType.ListEnd  );
@@ -433,6 +432,36 @@ classdef SpiceParser < handle
         errors(end+1) = error;
       end
       
+      %Remove all unsupported directives and throw warnings for each
+      directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
+      directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_indices);
+      unsupported_directives = directive_indices(~arrayfun(@(typ)SpiceParser.SupportedDirectiveMap(typ),directive_types));
+      for i=1:numel(unsupported_directives)
+        idx = unsupported_directives(i);
+        warning = SpiceParser.ErrorProto();
+        warning.type = 'UnsupportedDirective';
+        warning.line_number = declarations(idx).tokens(1).line_number;
+        warning.start = declarations(idx).tokens(1).start;
+        warning.message = sprintf('Unsupported directive type %s, it will be ignored.',declarations(idx).tokens(1).raw);
+        warnings(end+1) = warning; %#ok<AGROW>
+      end
+      declarations = declarations(~arrayfun(@(i)any(i==unsupported_directives),1:numel(declarations)));
+      
+      %Remove all unsupported declarations and thrown warnings for each
+      declaration_types = [declarations.type];
+      unsupported_declarations_lgc = ~arrayfun(@(typ)SpiceParser.SupportedDeclarationMap(typ),declaration_types);
+      unsupported_declarations_idx = find(unsupported_declarations_lgc);
+      for i=1:numel(unsupported_declarations_idx)
+        idx = unsupported_declarations_idx(i);
+        warning = SpiceParser.ErrorProto();
+        warning.type = 'UnsupportedDeclaration';
+        warning.line_number = declarations(idx).tokens(1).line_number;
+        warning.start = declarations(idx).tokens(1).start;
+        warning.message = sprintf('Unsupported declaration type %s, it will be ignored.',declarations(idx).tokens(1).raw);
+        warnings(end+1) = warning; %#ok<AGROW>
+      end
+      declarations = declarations(~unsupported_declarations_lgc);
+      
     end
     
  		function [values] = parseValue(strs)
@@ -529,6 +558,11 @@ classdef SpiceParser < handle
       for key = cflat(SpiceParser.DeclarationMap.values)
         out(key) = 0;
       end
+      out(SpiceParser.DeclarationType.Resistor)=1;
+      out(SpiceParser.DeclarationType.Inductor)=1;
+      out(SpiceParser.DeclarationType.Capacitor)=1;
+      out(SpiceParser.DeclarationType.VSource)=1;
+      out(SpiceParser.DeclarationType.ISource)=1;
     end
     function [out] = getSupportedDirectiveMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
