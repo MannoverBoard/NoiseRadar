@@ -74,6 +74,8 @@ classdef SpiceParser < handle
     DirectiveKeys = SpiceParser.DirectiveMap.keys;
     SupportedDirectiveMap = SpiceParser.getSupportedDirectiveMap();
     
+    ComponentProto=@()struct('name',[],'values',[],'nodes',[],'parameters',containers.Map('KeyType','char','ValueType','any'));
+    
     IndependentSourceTypes  = struct('Dc',0,'Ac',1);
     IndependentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndependentSourceTypes);
     
@@ -388,6 +390,7 @@ classdef SpiceParser < handle
       end
       
       %Subcircuit Nesting Logic
+      any_subscircuit_nesting_error = false;
       declaration_types = [declarations.type];
       directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
       directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_indices);
@@ -399,31 +402,34 @@ classdef SpiceParser < handle
       level_changes = (begins-ends);
       levels = zeros(size(level_changes));
       levels(1) = level_changes(1);
-      for i=2:numel(levels)
-        levels(i) = max([0,levels(i-1)])+level_changes(i);
+      for idx=2:numel(levels)
+        levels(idx) = max([0,levels(idx-1)])+level_changes(idx);
       end
       
       %Subcircuits cannot be nested
-      for i=find(levels>1)
+      for idx=find(levels>1)
+        any_subscircuit_nesting_error = true;
         error = SpiceParser.ErrorProto();
         error.type = 'NestedSubcircuit';
-        error.line_number = declarations(i).tokens(1).line_number;
-        error.start = declarations(i).tokens(1).start;
+        error.line_number = declarations(idx).tokens(1).line_number;
+        error.start = declarations(idx).tokens(1).start;
         error.message = 'Subcircuit definitions cannot be nested.';
         errors(end+1) = error; %#ok<AGROW>
       end
       
       %All subcircuits must have a matching .ENDS
-      for i=find(levels<0)
+      for idx=find(levels<0)
+        any_subscircuit_nesting_error = true;
         error = SpiceParser.ErrorProto();
         error.type = 'ExtraSubCircuitEnd';
-        error.line_number = declarations(i).tokens(1).line_number;
-        error.start = declarations(i).tokens(1).start;
+        error.line_number = declarations(idx).tokens(1).line_number;
+        error.start = declarations(idx).tokens(1).start;
         error.message = 'Extra SubCircuit .ENDS  directive.';
         errors(end+1) = error; %#ok<AGROW>
       end
       
       if levels(end)>0
+        any_subscircuit_nesting_error = true;
         error = SpiceParser.ErrorProto();
         error.type = 'MissingSubCircuitEnd';
         error.line_number = declarations(end).tokens(1).line_number;
@@ -432,12 +438,42 @@ classdef SpiceParser < handle
         errors(end+1) = error;
       end
       
+      %If on subscircuit nesting errors and either .ENDS or SUBCKT is not supported, then remove the whole groupings
+      if( ~any_subscircuit_nesting_error && ~(SpiceParser.SupportedDeclarationMap(DeclarationType.SubCircuit) && SpiceParser.SupportedDirectiveMap(DirectiveType.SubCircuitEnd)))
+        should_remove = zeros(size(declarations));
+        in_subcircuit = false;
+        subcircuit_indices = [];
+        for idx=1:numel(declarations)
+          decl = declarations(idx);
+          if decl.type==DeclarationType.SubCircuit
+            in_subcircuit=true;
+            subcircuit_indices(end+1) = idx; %#ok<AGROW>
+          elseif decl.type==DeclarationType.Directive && decl.directive_type==DirectiveType.SubCircuitEnd
+            in_subcircuit=false;
+            should_remove(idx)=1;
+          end
+          if in_subcircuit
+            should_remove(idx)=1;
+          end
+        end
+        for i=1:numel(subcircuit_indices)
+          idx = subcircuit_indices(i);
+          warning = SpiceParser.ErrorProto();
+          warning.type = 'UnsupportedSubCircuitDeclaration';
+          warning.line_number = declarations(idx).tokens(1).line_number;
+          warning.start = declarations(idx).tokens(1).start;
+          warning.message = 'SubCircuits are not supported, it will be ignored.';
+          warnings(end+1) = warning; %#ok<AGROW>
+        end
+        declarations = declarations(~should_remove);
+      end
+      
       %Remove all unsupported directives and throw warnings for each
       directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
       directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_indices);
       unsupported_directives = directive_indices(~arrayfun(@(typ)SpiceParser.SupportedDirectiveMap(typ),directive_types));
-      for i=1:numel(unsupported_directives)
-        idx = unsupported_directives(i);
+      for idx=1:numel(unsupported_directives)
+        idx = unsupported_directives(idx);
         warning = SpiceParser.ErrorProto();
         warning.type = 'UnsupportedDirective';
         warning.line_number = declarations(idx).tokens(1).line_number;
@@ -451,8 +487,8 @@ classdef SpiceParser < handle
       declaration_types = [declarations.type];
       unsupported_declarations_lgc = ~arrayfun(@(typ)SpiceParser.SupportedDeclarationMap(typ),declaration_types);
       unsupported_declarations_idx = find(unsupported_declarations_lgc);
-      for i=1:numel(unsupported_declarations_idx)
-        idx = unsupported_declarations_idx(i);
+      for idx=1:numel(unsupported_declarations_idx)
+        idx = unsupported_declarations_idx(idx);
         warning = SpiceParser.ErrorProto();
         warning.type = 'UnsupportedDeclaration';
         warning.line_number = declarations(idx).tokens(1).line_number;
@@ -461,7 +497,27 @@ classdef SpiceParser < handle
         warnings(end+1) = warning; %#ok<AGROW>
       end
       declarations = declarations(~unsupported_declarations_lgc);
+    end
+    
+    function [components,errors,warnings] = componentsFromDeclarations(declarations)
+      %Remove subscircuit -> .ends first
       
+      %Remove 
+%        'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
+%       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceTypes
+%       'VcVSource' ,2 ,...
+%       'VcISource' ,3 ,...
+%       'IcVSource' ,4 ,...
+%       'IcISource' ,5 ,...
+%       'Diode'     ,6 ,...
+%       'Directive' ,7 ,...
+%       'BJT'       ,8 ,...
+%       'Mosfet'    ,9 ,...
+%       'SubCircuit',10,...
+%       'User'      ,11,...
+%       'Resistor'  ,12,...
+%       'Capacitor' ,13,...
+%       'Inductor'  ,14 ...
     end
     
  		function [values] = parseValue(strs)
@@ -569,6 +625,8 @@ classdef SpiceParser < handle
       for key = cflat(SpiceParser.DirectiveMap.values)
         out(key) = 0;
       end
+      out(SpiceParser.DirectiveType.SubCircuitEnd)=1;
+      out(SpiceParser.DirectiveType.End          )=1;
     end
     function [out] = getSupportedModelTypesMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');

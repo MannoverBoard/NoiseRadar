@@ -13,6 +13,8 @@ R5 +1 6 6;
 +FOOFLY
 
 SUBCKT as asdf
+R1 1 1 1 1  1
+R2 3 43 34 3 3 
 .ENDS
 
 
