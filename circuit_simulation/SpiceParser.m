@@ -6,28 +6,35 @@ classdef SpiceParser < handle
     
     linebreak_pattern = '[\r?\n]';
     
-    comment_pattern = '[*;]';
     line_continuation_pattern = '^\s*[+]';%continues from previous line
     
     token_delimiter = '\s*';
     
+    ErrorProto = @()struct('type',[],'line_number',[],'start',[],'message',[]);
+    EmptyError = aindex(SpiceParser.ErrorProto(),[]);
+    
     word_pattern = '[-a-zA-Z_0-9+.]+';
     equality_pattern = '[=]';
-    parameter_list_begin = '[(]';
-    parameter_list_end   = '[)]';
+    list_begin_pattern = '[\(]';
+    list_end_pattern   = '[\)]';
+    comment_pattern = '[*;]';
     
     identifier_pattern = '[a-zA-Z_][a-zA-Z0-9_]*';
     
+    LineProto = @(raw,line_number,start)struct('raw',raw,'line_number',line_number,'start',start);
+    
     TokenType = struct(...
-      'Word'          ,0,...
-      'Equality'      ,1,...
-      'ParameterBegin',2,...
-      'ParameterEnd'  ,3 ...
+      'Word'     ,0,...
+      'Equality' ,1,...
+      'ListBegin',2,...
+      'ListEnd'  ,3,...
+      'Comment'  ,4 ...
     );
     TokenTypeMap = SpiceParser.getTokenTypeMap();
     TokenTypeKeys = SpiceParser.TokenTypeMap.keys;
-		TokenProto = @()struct('type',[],'raw',[]);
-		
+		TokenProto = @()struct('type',[],'raw',[],'line_number',[],'start',[]);
+    EmptyToken = aindex(SpiceParser.TokenProto(),[]);
+    
     DeclarationType = struct(...
       'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceTypes
@@ -46,6 +53,7 @@ classdef SpiceParser < handle
     DeclarationKeys = SpiceParser.DeclarationMap.keys;
     SupportedDeclarationMap = SpiceParser.getSupportedDirectiveMap();
     DeclarationProto = @()struct('type',[],'raw',[],'tokens',[]);
+    EmptyDeclaration = aindex(SpiceParser.DeclarationProto(),[]);
     
     DirectiveType = struct(...
       'Model' , 0,...
@@ -143,7 +151,7 @@ classdef SpiceParser < handle
 %   end
   methods(Static)
   	
-    function [text] = loadFile(filename)
+    function [text] = readFile(filename)
       fin = -1;
       try
        fin = fopen(filename,'rb');
@@ -161,47 +169,134 @@ classdef SpiceParser < handle
     function [lines,title]  = parseText(text)
     	%Split lines
     	lines = regexp(text,SpiceParser.linebreak_pattern,'split');
-    	%Split on line continuations
-    	lines = regexp(lines,SpiceParser.line_continuation_pattern,'split');
-    	out = {};
-    	for line = lines
-        line = line{1}; %#ok<FXSET>
-        n = numel(line);
-        if n==0
+    	%Find line continuation matches
+      continuation_matches = regexp(lines,SpiceParser.line_continuation_pattern,'match');
+      start_chars = 1+cellfun(@(c)tern(isempty(c),0,@()numel(c{1})),continuation_matches);
+      
+      %Record line number info & combine line continuations
+      LineProto = SpiceParser.LineProto;
+      lines = arrayfun(@(i)LineProto(lines{i}(start_chars(i):end),i,start_chars(i)),1:numel(lines));
+      
+      out = {};
+      for line=lines
+        if isempty(line.raw)
           continue;
-        elseif n==1
-    			out(end+1) = line; %#ok<AGROW>
-    		else
-    			out{end} = [out{end} line{2:end}];
-    		end
-   		end
-  		lines = out;
-    	%Remove comments
-    	lines = regexp(lines,SpiceParser.comment_pattern,'split');
-      lines = cellfun(@(line)line{1},lines,'Un',0);
-  		%Remove empty lines
-  		lines = lines(~cellfun(@isempty,lines));
-  		title = lines{1};
-  		lines = lines(2:end);
+        end
+        is_continued_from_previous = (line.start~=1);
+        if is_continued_from_previous
+          out{end} = [out{end} line];
+        else
+          out{end+1} = line; %#ok<AGROW>
+        end
+      end
+      lines = out;
+      
+      title = strjoin(cs2cell(lines{1}.raw),'\n');
+      lines = lines(2:end);
 		end
 		
-    function [token_groups] = tokenizeLines(lines)
-    	token_groups = regexp(lines,SpiceParser.token_delimiter,'split');
-    	token_groups = cellfun(@(tokens)tokens(~cellfun(@isempty,tokens)),token_groups,'Un',0);
-    	token_groups = cellfun(@(tkns)cellfun(@(tkn)SpiceParser.classifyToken(tkn),tkns),token_groups,'Un',0);
+    function [token_groups,errors] = tokenizeLines(lines)
+      errors = SpiceParser.EmptyError;
+      TokenProto = SpiceParser.TokenProto;
+      EmptyToken = SpiceParser.EmptyToken;
+      token_groups = {};
+      token_regex = cellfun(@(s)['(' s ')'],SpiceParser.TokenTypeKeys,'Un',0);
+      for line_group = lines
+        line_group = line_group{1}; %#ok<FXSET>
+        token_group = EmptyToken;
+        for line = line_group
+          token_extents = regexp(line.raw,token_regex,'tokenExtents');
+          token_line_group = EmptyToken;
+          for i=1:numel(token_extents)
+            if isempty(token_extents{i})
+              continue;
+            end
+            token_type = SpiceParser.TokenTypeMap(SpiceParser.TokenTypeKeys{i});
+            extents = token_extents{i};
+            for j=1:numel(extents)
+              token = TokenProto();
+              token.type = token_type;
+              token.raw = line.raw(extents{j}(1):extents{j}(2));
+              token.line_number = line.line_number;
+              token.start = extents{j}(1);
+              token_line_group(end+1) = token; %#ok<AGROW>
+            end
+          end
+          [~,idx] = sort(arrayfun(@(token)token.start,token_line_group));
+          token_line_group = token_line_group(idx);
+          token_group = [token_group token_line_group]; %#ok<AGROW>
+        end
+        token_groups{end+1} = token_group; %#ok<AGROW>
+      end
+      for i=1:numel(token_groups)
+        %discard tokens after comments
+        idx = find([token_groups{i}.type]==SpiceParser.TokenType.Comment,1,'first');
+        if isempty(idx) || idx<1
+          continue;
+        end
+        token_groups{i} = token_groups{i}(1:idx-1); %#ok<AGROW>
+      end
+      nonempties = ~cellfun(@isempty,token_groups);
+      token_groups = token_groups(nonempties);
+      
+      %TOKEN RULES
+      for token_group = token_groups
+        token_group = token_group{1}; %#ok<FXSET>
+        token_types = arrayfun(@(token)token.type,token_group);
+        %Word must be first token on a line
+        if token_types(1)~=SpiceParser.TokenType.Word
+          error = SpiceParser.ErrorProto();
+          error.type = 'TokenSyntax';
+          error.line_number = token_group(1).line_number;
+          error.start = token_group(1).start;
+          error.message = 'First token on a line must be a word.';
+          errors(end+1) = error; %#ok<AGROW>
+        end
+        
+        %Check that equality tokens have words on either side
+        if any(token_types==SpiceParser.TokenType.Equality)
+          N = numel(token_group);
+          eq_indices = find((token_types==SpiceParser.TokenType.Equality));
+          for i=1:numel(eq_indices)
+            eq_idx = eq_indices(i);
+            if (eq_idx==1 || eq_idx==N || token_types(eq_idx-1)~=SpiceParser.TokenType.Word || token_types(eq_idx+1)~=SpiceParser.TokenType.Word)
+              error = SpiceParser.ErrorProto();
+              error.type = 'TokenSyntax';
+              error.line_number = token_group(eq_idx).line_number;
+              error.start = token_group(eq_idx).start;
+              error.message = 'Equality tokens must have a word on either side.';
+              errors(end+1) = error; %#ok<AGROW>
+            end
+          end
+        end
+        
+        %List begins and ends must nest properly
+        begins = (token_types==SpiceParser.TokenType.ListBegin);
+        ends   = (token_types==SpiceParser.TokenType.ListEnd  );
+        level_changes = (begins-ends);
+        levels = cumsum(level_changes);
+        for i=find(levels<0)
+          error = SpiceParser.ErrorProto();
+          error.type = 'ExtraEndParenthesis';
+          error.line_number = token_group(i).line_number;
+          error.start = token_group(i).start;
+          error.message = 'Extra ending parenthesis.';
+          errors(end+1) = error; %#ok<AGROW>
+        end
+        if levels(end)>0
+          error = SpiceParser.ErrorProto();
+          error.type = 'MissingEndParenthesis';
+          error.line_number = token_group(end).line_number;
+          error.start = token_group(end).start;
+          error.message = sprintf('Missing %d ending parenthes%ss.',levels(end),tern(levels(end)>1,'e','i'));
+          errors(end+1) = error; %#ok<AGROW>
+        end
+      end
     end
-    
-    function [tok] = classifyToken(token)
-    	idx = find(~cellfun(@isempty,regexp(token,SpiceParser.TokenTypeKeys)),1,'first');
-    	type = SpiceParser.TokenTypeMap(SpiceParser.TokenTypeKeys{idx});
-    	tok = SpiceParser.TokenProto();
-    	tok.type = type;
-    	tok.raw = token;
- 		end
  		
- 		function [declarations,valid] = declarationsFromTokens(token_groups)
-      valid = true;
- 			declarations = SpiceParser.DeclarationProto();
+ 		function [declarations,error_messages] = declarationsFromTokens(token_groups)
+      error_messages = {};
+      declarations = SpiceParser.DeclarationProto();
  			declarations = declarations([]);
       Word = SpiceParser.TokenType.Word;
       for token_group = token_groups
@@ -259,10 +354,11 @@ classdef SpiceParser < handle
     function [out] = getTokenTypeMap()
       out = containers.Map('KeyType','char','ValueType','double');
       TokenType = SpiceParser.TokenType;
-      out(SpiceParser.word_pattern             ) = TokenType.Word;
-      out(SpiceParser.equality_pattern         ) = TokenType.Equality;
-      out(SpiceParser.parameter_list_begin     ) = TokenType.ParameterBegin;
-      out(SpiceParser.parameter_list_end       ) = TokenType.ParameterEnd;
+      out(SpiceParser.word_pattern      ) = TokenType.Word;
+      out(SpiceParser.equality_pattern  ) = TokenType.Equality;
+      out(SpiceParser.list_begin_pattern) = TokenType.ListBegin;
+      out(SpiceParser.list_end_pattern  ) = TokenType.ListEnd;
+      out(SpiceParser.comment_pattern   ) = TokenType.Comment;
     end
     function [out] = getDeclarationMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);

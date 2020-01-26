@@ -1,0 +1,32 @@
+TOKEN error test
+
+= ;error
+C1= ;error
+C1=3 ;non error
+== ;error
+C1=C1 C1=C1 ;no error
+C1=C1 C1= ;error
+==== ;error
+
+( ;error
+) ;error
+C1 (ROFL) ;error
+C1 (( )) ;no error
+C1 (( ( ;error
+C1 ))) ;error
+C1 (( ) ;error
+
+;;;;;;;; HEY
+
+AA ( ( 
++ ) ) ;no error
+
+AA ( 
++ ) ) ;error
+
+AA ( 
++ (
++ (
++ )
++ )
++ ) ;no error
