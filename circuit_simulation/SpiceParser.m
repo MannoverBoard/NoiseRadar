@@ -46,7 +46,7 @@ classdef SpiceParser < handle
     );
     TokenTypeMap = SpiceParser.getTokenTypeMap();
     TokenTypeKeys = SpiceParser.TokenTypeMap.keys;
-		TokenProto = @()struct('type',[],'raw',[],'line_number',[],'start',[]);
+    TokenProto = @()struct('type',[],'raw',[],'line_number',[],'start',[]);
     EmptyToken = aindex(SpiceParser.TokenProto(),[]);
     % /Token Definitions
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -270,9 +270,9 @@ classdef SpiceParser < handle
     end
     
     function [lines,title]  = parseText(text)
-    	%Split lines
-    	lines = regexp(text,SpiceParser.linebreak_pattern,'split');
-    	%Find line continuation matches
+      %Split lines
+      lines = regexp(text,SpiceParser.linebreak_pattern,'split');
+      %Find line continuation matches
       continuation_matches = regexp(lines,SpiceParser.line_continuation_pattern,'match');
       start_chars = 1+cellfun(@(c)tern(isempty(c),0,@()numel(c{1})),continuation_matches);
       
@@ -296,8 +296,8 @@ classdef SpiceParser < handle
       
       title = strjoin(cs2cell(lines{1}.raw),'\n');
       lines = lines(2:end);
-		end
-		
+    end
+    
     function [token_groups,errors] = tokenizeLines(lines)
       errors = SpiceParser.EmptyError;
       TokenProto = SpiceParser.TokenProto;
@@ -401,8 +401,8 @@ classdef SpiceParser < handle
         end
       end
     end
- 		
- 		function [declarations,errors,warnings] = declarationsFromTokens(token_groups)
+     
+     function [declarations,errors,warnings] = declarationsFromTokens(token_groups)
       declarations = SpiceParser.EmptyDeclaration;
       errors   = SpiceParser.EmptyError;
       warnings = SpiceParser.EmptyError;
@@ -621,9 +621,9 @@ classdef SpiceParser < handle
       end
     end
     
- 		function [values] = parseValue(strs)
- 			groups = cflat(regexp(strs,SpiceParser.ValuePattern,'tokens'));
- 			values = cellfun(@(group)tern(isempty(group),nan,@()str2double(group{1}).*SpiceParser.ValueSuffixMap(group{2})),groups);
+     function [values] = parseValue(strs)
+       groups = cflat(regexp(strs,SpiceParser.ValuePattern,'tokens'));
+       values = cellfun(@(group)tern(isempty(group),nan,@()str2double(group{1}).*SpiceParser.ValueSuffixMap(group{2})),groups);
     end
     
     function [out] = structToMap(strct)
@@ -750,8 +750,8 @@ classdef SpiceParser < handle
         DeclarationType.Igbt               ...
       };
       metatype2types(DeclarationMetaType.Directive) = {...
-      	DeclarationType.Directive ,...
-			};
+        DeclarationType.Directive ,...
+      };
       assert(metatype2types.Count==numel(fieldnames(DeclarationMetaType)));
       assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(DeclarationType)));
       for key_c = metatype2types.keys
@@ -765,14 +765,14 @@ classdef SpiceParser < handle
       end
       %%%%%
       supported_types = [DeclarationType.Resistor ,...
-												 DeclarationType.Inductor ,...
-												 DeclarationType.Capacitor,...
-												 DeclarationType.VSource  ,...
-												 DeclarationType.ISource   ...
-			];
+                         DeclarationType.Inductor ,...
+                         DeclarationType.Capacitor,...
+                         DeclarationType.VSource  ,...
+                         DeclarationType.ISource   ...
+      ];
       for key = supported_types
-      	entry = out(key);
-      	entry.supported = true;
+        entry = out(key);
+        entry.supported = true;
         out(key) = entry;
       end
       %%%%%
@@ -909,10 +909,10 @@ classdef SpiceParser < handle
       end
       %%%%%
       supported_types = [DirectiveType.End ,...
-			];
+      ];
       for key = supported_types
-      	entry = out(key);
-      	entry.supported = true;
+        entry = out(key);
+        entry.supported = true;
         out(key) = entry;
       end
       %%%%%
