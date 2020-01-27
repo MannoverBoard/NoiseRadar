@@ -1,19 +1,23 @@
 classdef SpiceParser < handle
-  properties(Constant,Hidden)
+  properties(Constant)%,Hidden)
     uid_type = 'int64';
   end
-  properties(Constant)  
-    
-    
+  properties(Constant)%,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Error Definitions
     ErrorProto = @()struct('type',[],'line_number',[],'start',[],'message',[]);
     EmptyError = aindex(SpiceParser.ErrorProto(),[]);
     % /Error Definitions
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
+    GenericInfoProto = @()struct('type',[],'name',[],'key',[],'supported',false);
+  end
+  
+  properties(Constant)%,Hidden)
     identifier_pattern = '[a-zA-Z_][a-zA-Z0-9_]*';
     
+  end
+  
+  properties(Constant)%,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Line Definitions
     linebreak_pattern = '(\r?\n)';
@@ -22,7 +26,9 @@ classdef SpiceParser < handle
     LineProto = @(raw,line_number,start)struct('raw',raw,'line_number',line_number,'start',start);
     % /Line Definitions
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
+  end
+  
+  properties(Constant)%,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Token Definitions
     word_pattern = '[-a-zA-Z_0-9+.]+';
@@ -46,7 +52,9 @@ classdef SpiceParser < handle
     EmptyToken = aindex(SpiceParser.TokenProto(),[]);
     % /Token Definitions
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
+  end
+  
+  properties(Constant)%,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Declaration Information
     DeclarationMetaType = struct(...
@@ -178,14 +186,15 @@ classdef SpiceParser < handle
     DirectiveTypeInfoMap = SpiceParser.getDirectiveTypeInfoMap();
     % /Directive Information
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
+  end
+  
+  properties(Constant)%,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     ComponentProto=@()struct('name',[],'values',[],'nodes',[],'parameters',containers.Map('KeyType','char','ValueType','any'));
     
     IndependentSourceTypes  = struct('Dc',0,'Ac',1);
     IndependentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndependentSourceTypes);
     
-    GenericInfoProto = @()struct('type',[],'name',[],'key',[],'supported',false);
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     ModelType = struct(...
       'Diode', 0,...
@@ -243,14 +252,15 @@ classdef SpiceParser < handle
       SpiceParser.PrintFormatTypeInfoProto ...
     );
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    ValueSuffixMap = SpiceParser.getValuesSuffixMap();
-    ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
   end
   
+  properties(Constant)%,Hidden)
+    ValueSuffixMap = SpiceParser.getValuesSuffixMap();
+    ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(@SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
+  end
   
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   methods(Static)
-  	
     function [text] = readFile(filename)
       fin = -1;
       try
@@ -605,14 +615,14 @@ classdef SpiceParser < handle
       declarations = declarations(~unsupported_declarations_lgc);
     end
   end
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   
-  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   % Utitity Functions
-  methods(Static,Hidden)
+  methods(Static)%,Hidden)
     function [Y] = esc(X)
-      if nargin<1 || isempty(X)
-        Y = X;
+      if nargin<1
+        Y = '';
       else
         Y = regexptranslate('escape',X);
       end
@@ -662,7 +672,7 @@ classdef SpiceParser < handle
   
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   % Static Getters
-  methods(Static,Hidden)
+  methods(Static)%,Hidden)
  		
     function [out] = getValuesSuffixMap()
       out = containers.Map('KeyType','char','ValueType','double');
