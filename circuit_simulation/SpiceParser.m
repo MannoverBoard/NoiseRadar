@@ -1119,8 +1119,10 @@ classdef SpiceParser < handle
   end
   properties(Constant)%,Hidden)
     ValueSuffixMap = SpiceParser.getValuesSuffixMap();
-    ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(@SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
-    PositiveValuePattern = ['^([+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(@SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
+    ValuePattern = ['([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' ...
+      strjoin(cellfun(@SpiceParser.esc,removeEmpties(SpiceParser.ValueSuffixMap.keys),'Un',0),'|') ')?'];
+    PositiveValuePattern = ['([+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' ...
+      strjoin(cellfun(@SpiceParser.esc,removeEmpties(SpiceParser.ValueSuffixMap.keys),'Un',0),'|') ')?'];
     
     SyntaxPattern = struct(...
       'Word'              , SpiceParser.word_pattern        , ...
@@ -1134,7 +1136,7 @@ classdef SpiceParser < handle
       'PositiveValue'     , SpiceParser.PositiveValuePattern  ...
     );
     SyntaxProto  = @()struct('name',[],'required_min',1,'required_max',1,'choices',false,...
-      'pattern',[]);
+      'pattern',[],'regex',[]);
     
     DeclarationSyntaxMap = SpiceParser.getDeclarationSyntaxMap();
   end
@@ -1552,5 +1554,43 @@ classdef SpiceParser < handle
   end
   % /Static Getters
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  methods(Static)
+    function [regx] = regexFromSyntaxPattern(pattern)
+      stack = Deque();
+      stack.push(pattern)
+      out = {};
+      while ~isempty(stack)
+        numel(stack.values)
+        context = stack.pop();
+        if isempty(context)
+          continue;
+        end
+        broke_out = false;
+        for i=1:numel(context)
+          value = context{i};
+          if ischar(value)
+            if i==1
+              value = ['(' value ]; %#ok<AGROW>
+            end
+            out{end+1} = value; %#ok<AGROW>
+          else
+            stack.push(context(i+1:end));
+            if isstruct(value)
+              stack.push(context{i}.pattern)
+            else
+              stack.push(value);
+            end
+            broke_out = true;
+            break;
+          end
+        end
+        if ~broke_out
+          out{end} = [out{end} ')'];
+        end
+      end
+      regx = strjoin(out,' ');
+    end
+  end
+ 
+end
   
- end
