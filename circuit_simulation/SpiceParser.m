@@ -45,7 +45,7 @@ classdef SpiceParser < handle
     
     DeclarationType = struct(...
       'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
-      'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceTypes
+      'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceType
       'VcVSource' ,2 ,...
       'VcISource' ,3 ,...
       'IcVSource' ,4 ,...
@@ -140,7 +140,7 @@ classdef SpiceParser < handle
     DirectiveTypeMap = SpiceParser.getDirectiveTypeMap();
     
     DirectiveTypeInfoProto = @()struct('type',[],'name',[],'key',[],'meta_type',[],'reference_types',[], ...
-      'pairing_type',SpiceParser.DirectivePairingType.Single,'supported',0);
+      'pairing_type',SpiceParser.DirectivePairingType.Single,'supported',false);
     DirectiveTypeInfoMap = SpiceParser.getDirectiveTypeInfoMap();
     % /Directive Information
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -151,34 +151,64 @@ classdef SpiceParser < handle
     IndependentSourceTypes  = struct('Dc',0,'Ac',1);
     IndependentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndependentSourceTypes);
     
-    ModelTypes = struct(...
+    GenericInfoProto = @()struct('type',[],'name',[],'key',[],'supported',false);
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    ModelType = struct(...
       'Diode', 0,...
       'Npn'  , 1,...
       'Pnp'  , 2,...
       'Nmos' , 3,...
       'Pmos' , 4 ...
     );
-    ModelTypesMap = SpiceParser.getModelTypesMap();
-    SupportedModelTypesMap = SpiceParser.getSupportedModelTypesMap();
+    ModelTypeMap = SpiceParser.getModelTypeMap();
+    ModelTypeInfoProto = SpiceParser.GenericInfoProto;
+    ModelTypeInfoMap = SpiceParser.addTypeInfoToMap(...
+      SpiceParser.ModelType          ,...
+      SpiceParser.ModelTypeMap       ,...
+      SpiceParser.ModelTypeInfoProto  ...
+    );
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    IndepdentSourceType          = struct('Dc',0,'Ac',1);
+    IndepdentSourceTypeMap       = SpiceParser.structToMap(SpiceParser.IndepdentSourceType);
+    IndepdentSourceTypeInfoProto = SpiceParser.GenericInfoProto;
+    IndepdentSourceTypeInfoMap = SpiceParser.addTypeInfoToMap(...
+      SpiceParser.IndepdentSourceType         ,...
+      SpiceParser.IndepdentSourceTypeMap      ,...
+      SpiceParser.IndepdentSourceTypeInfoProto ...
+    );
     
-    IndepdentSourceTypes = struct('Dc',0,'Ac',1);
-    IndepdentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndepdentSourceTypes);
+    AcSweepType = struct('Lin',0,'Dec',1,'Oct',2);
+    AcSweepTypeMap = SpiceParser.structToMap(SpiceParser.AcSweepType);
+    AcSweepTypeInfoProto = SpiceParser.GenericInfoProto;
+    AcSweepTypeInfoMap = SpiceParser.addTypeInfoToMap(...
+      SpiceParser.AcSweepType         ,...
+      SpiceParser.AcSweepTypeMap      ,...
+      SpiceParser.AcSweepTypeInfoProto ...
+    );
     
-    AcSweepTypes = struct('Lin',0,'Dec',1,'Oct',2);
-    AcSweepTypesMap = SpiceParser.structToMap(SpiceParser.AcSweepTypes);
-    SupportedAcSweepTypesMap = SpiceParser.getSupportedAcSweepTypesMap();
+    DcSweepType = SpiceParser.AcSweepType;
+    DcSweepTypeMap = SpiceParser.AcSweepTypeMap;
+    DcSweepTypeProto = SpiceParser.AcSweepTypeInfoProto;
+    DcSweepTypeInfoMap = SpiceParser.AcSweepTypeInfoMap;
     
-    DcSweepTypes = SpiceParser.AcSweepTypes;
-    DcSweepTypesMap = SpiceParser.AcSweepTypesMap;
-    SupportedDcSweepTypesMap = SpiceParser.getSupportedDcSweepTypesMap();
+    TransientSourceType = struct('Exp',0,'Pulse',1,'Pwl',2,'Sin',3);
+    TransientSourceTypeMap = SpiceParser.structToMap(SpiceParser.TransientSourceType);
+    TransientSourceTypeInfoProto = SpiceParser.GenericInfoProto;
+    TransientSourceTypeInfoMap = SpiceParser.addTypeInfoToMap(...
+      SpiceParser.TransientSourceType         ,...
+      SpiceParser.TransientSourceTypeMap      ,...
+      SpiceParser.TransientSourceTypeInfoProto ...
+    );
     
-    TransientSourceTypes = struct('Exp',0,'Pulse',1,'Pwl',2,'Sin',3);
-    TransientSourceTypesMap = SpiceParser.structToMap(SpiceParser.TransientSourceTypes);
-    SupportedTransientSourceTypesMap = SpiceParser.getSupportedTransientSourceTypesMap();
-    
-    PrintFormatTypes = struct('M',0,'dB',1,'P',2,'R',3,'I',4);%magnitdue,dB,phase,real,imag
-    PrintFormatTypesMap = SpiceParser.structToMap(SpiceParser.PrintFormatTypes);
-    
+    PrintFormatType = struct('M',0,'dB',1,'P',2,'R',3,'I',4);%magnitdue,dB,phase,real,imag
+    PrintFormatTypeMap = SpiceParser.structToMap(SpiceParser.PrintFormatType);
+    PrintFormatTypeInfoProto = SpiceParser.GenericInfoProto;
+    PrintFormatTypeInfoMap = SpiceParser.addTypeInfoToMap(...
+      SpiceParser.PrintFormatType         ,...
+      SpiceParser.PrintFormatTypeMap      ,...
+      SpiceParser.PrintFormatTypeInfoProto ...
+    );
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     ValueSuffixMap = SpiceParser.getValuesSuffixMap();
     ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
   end
@@ -588,7 +618,7 @@ classdef SpiceParser < handle
       
       %Remove 
 %        'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
-%       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceTypes
+%       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceType
 %       'VcVSource' ,2 ,...
 %       'VcISource' ,3 ,...
 %       'IcVSource' ,4 ,...
@@ -615,6 +645,30 @@ classdef SpiceParser < handle
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
       for i=1:numel(fns)
         out(lfns{i}) = strct.(fns{i});
+      end
+    end
+    function [out] = addTypeInfoToMap(Type,Map,InfoProto,map)
+      if nargin<4 || isempty(map)
+        out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
+      else
+        out = map;
+      end
+      names = fieldnames(Type);
+      typeval2name = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','char');
+      for i = 1:numel(names)
+        name = names{i};
+        typeval2name(Type.(name)) = name;
+      end
+      assert(typeval2name.Count==numel(fieldnames(Type)));
+      for key_c = Map.keys
+        key = key_c{1};
+        typeval = Map(key);
+        out(typeval) = InfoProto();
+        entry = out(typeval);
+        entry.type = typeval;
+        entry.key  = key;
+        entry.name = typeval2name(typeval);
+        out(typeval) = entry;
       end
     end
     function [out] = getValuesSuffixMap()
@@ -678,25 +732,8 @@ classdef SpiceParser < handle
       Type = SpiceParser.DeclarationType;
       Map  = SpiceParser.DeclarationTypeMap;
       InfoProto = SpiceParser.DirectiveTypeInfoProto;
+      out = SpiceParser.addTypeInfoToMap(Type,Map,InfoProto,out);
       %%%%%
-      names = fieldnames(Type);
-      typeval2name = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','char');
-      for i = 1:numel(names)
-        name = names{i};
-        typeval2name(Type.(name)) = name;
-      end
-      assert(typeval2name.Count==numel(fieldnames(Type)));
-      for key_c = Map.keys
-        key = key_c{1};
-        typeval = Map(key);
-        out(typeval) = InfoProto();
-        entry = out(typeval);
-        entry.type = typeval;
-        entry.key  = key;
-        entry.name = typeval2name(typeval);
-        out(typeval) = entry;
-      end
-      %%%%%%
       metatype2types = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
       DeclarationMetaType = SpiceParser.DeclarationMetaType;
       DeclarationType     = SpiceParser.DeclarationType;
@@ -804,25 +841,8 @@ classdef SpiceParser < handle
       Type = SpiceParser.DirectiveType;
       Map  = SpiceParser.DirectiveTypeMap;
       InfoProto = SpiceParser.DirectiveTypeInfoProto;
+      out = SpiceParser.addTypeInfoToMap(Type,Map,InfoProto,out);
       %%%%%
-      names = fieldnames(Type);
-      typeval2name = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','char');
-      for i = 1:numel(names)
-        name = names{i};
-        typeval2name(Type.(name)) = name;
-      end
-      assert(typeval2name.Count==numel(fieldnames(Type)));
-      for key_c = Map.keys
-        key = key_c{1};
-        typeval = Map(key);
-        out(typeval) = InfoProto();
-        entry = out(typeval);
-        entry.type = typeval;
-        entry.key  = key;
-        entry.name = typeval2name(typeval);
-        out(typeval) = entry;
-      end
-      %%%%%%
       metatype2types = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
       DirectiveMetaType = SpiceParser.DirectiveMetaType;
       DirectiveType     = SpiceParser.DirectiveType;
@@ -925,61 +945,18 @@ classdef SpiceParser < handle
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    function [out] = getModelTypesMap()
+    % Model Type Static Getters
+    function [out] = getModelTypeMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
-      ModelTypes = SpiceParser.ModelTypes;
-      out('d'   ) = ModelTypes.Diode;
-      out('npn' ) = ModelTypes.Npn;
-      out('pnp' ) = ModelTypes.Pnp;
-      out('nmos') = ModelTypes.Nmos;
-      out('pmos') = ModelTypes.Pmos;
-      assert(out.Count==numel(fieldnames(ModelTypes)));
+      ModelType = SpiceParser.ModelType;
+      out('d'   ) = ModelType.Diode;
+      out('npn' ) = ModelType.Npn;
+      out('pnp' ) = ModelType.Pnp;
+      out('nmos') = ModelType.Nmos;
+      out('pmos') = ModelType.Pmos;
+      assert(out.Count==numel(fieldnames(ModelType)));
     end
-    
-    function [out] = getSupportedDeclarationTypeMap()
-      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.DeclarationTypeMap.values)
-        out(key) = 0;
-      end
-      out(SpiceParser.DeclarationType.Resistor)=1;
-      out(SpiceParser.DeclarationType.Inductor)=1;
-      out(SpiceParser.DeclarationType.Capacitor)=1;
-      out(SpiceParser.DeclarationType.VSource)=1;
-      out(SpiceParser.DeclarationType.ISource)=1;
-    end
-    function [out] = getSupportedDirectiveTypeMap()
-      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.DirectiveTypeMap.values)
-        out(key) = 0;
-      end
-      out(SpiceParser.DirectiveType.SubCircuitEnd)=1;
-      out(SpiceParser.DirectiveType.End          )=1;
-    end
-    function [out] = getSupportedModelTypesMap()
-      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.ModelTypesMap.values)
-        out(key) = 0;
-      end
-    end
-    
-    function [out] = getSupportedAcSweepTypesMap()
-      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.AcSweepTypesMap.values)
-        out(key) = 0;
-      end
-    end
-    function [out] = getSupportedDcSweepTypesMap()
-      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.DcSweepTypesMap.values)
-        out(key) = 0;
-      end
-    end
-    function [out] = getSupportedTransientSourceTypesMap()
-      out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.TransientSourceTypesMap.values)
-        out(key) = 0;
-      end
-    end
-    
+    % /Model Type Static Getters
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end
  end
