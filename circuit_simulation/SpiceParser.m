@@ -70,13 +70,13 @@ classdef SpiceParser < handle
       'IcVSource'        , int64('H'),... %H<name> <+ node> <- node> <controlling V device name> <transresistance>
       'ISource'          , int64('I'),... %I<name> <+ node> <- node> [[DC] <value>] [AC <magnitude value> [phase value]] [transient specification]
       'Jfet'             , int64('J'),... %J<name> <drain node> <gate node> <source node> <model name> [area value]
-      'Inductor'         , int64('L'),... %L<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
       'Coupling'         , int64('K'),...
       ... %Inductor Coupling K LL
       ...  %K<name> L<inductor name> <L<inductor name>>* <coupling value>
       ...  %K<name> <L<inductor name>>* <coupling value> <model name> [size value]
       ... %TransmissionLine Coupling K TT
       ...  %K<name> T<line name> <T<line name>>* CM=<coupling capacitance> LM=<coupling inductance>
+      'Inductor'         , int64('L'),... %L<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
       'Mosfet'           , int64('M'),... %M<name> <drain node> <gate node> <source node> + <bulk/substrate node> <model name>
       'DigitalInput'     , int64('N'),... %N<name> <interface node> <low level node> <high level node> <model name> <input specification>
       'DigitalOutput'    , int64('O'),... %O<name> <interface node> <low level node> <high level node> <model name> <output specification>
@@ -1134,9 +1134,9 @@ classdef SpiceParser < handle
       'PositiveValue'     , SpiceParser.PositiveValuePattern  ...
     );
     SyntaxProto  = @()struct('name',[],'required_min',1,'required_max',1,'choices',false,...
-      'pattern',[],'ordered',true);
+      'pattern',[]);
     
-    %DeclarationSyntaxMap = SpiceParser.getDeclarationSyntaxMap();
+    DeclarationSyntaxMap = SpiceParser.getDeclarationSyntaxMap();
   end
   methods(Static)
     function [out] = WordSyntax(name,required_min,required_max)
@@ -1223,7 +1223,7 @@ classdef SpiceParser < handle
       syntax.name = type_info.name;
       syntax.key  = type_info.type;
       syntax.pattern = {Word('node_plus'),Word('node_minus'),Word('model_name',0),Value('value'),...
-        Namedvalue('IC',0)};
+        NamedValue('IC',0)};
       out(type_info.type) = syntax;
       
       %%%%%%%%%%
@@ -1248,7 +1248,7 @@ classdef SpiceParser < handle
       
       %%%%%%%%%%
       %'IcISource'        , int64('F'),... %F<name> <+ node> <- node> <controlling V device name> <gain>
-      type_val = DeclarationType.IcVSource;
+      type_val = DeclarationType.IcISource;
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
@@ -1290,27 +1290,17 @@ classdef SpiceParser < handle
       ac_pattern = Word('AC',0);
       ac_pattern.pattern = {Word('AC',0),Value('magnitude'),Value('phase',0)};
       
-      syntax.pattern = {Word('node_plus'),Word('node_minus'),dc_pattern,ac_pattern,transient_optional_pattern};
+      syntax.pattern = {Word('node_plus'),Word('node_minus'),dc_pattern,ac_pattern,transient_optional_syntax};
       out(type_info.type) = syntax;
       
       %%%%%%%%%%
       %'Jfet'             , int64('J'),... %J<name> <drain node> <gate node> <source node> <model name> [area value]
-      type_val = DeclarationType.Gaasfet;
+      type_val = DeclarationType.Jfet;
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
       syntax.key  = type_info.type;
       syntax.pattern = {Word('drain'),Word('gate'),Word('source'),Word('model_name'),Value('area',0)};
-      out(type_info.type) = syntax;
-      
-      %%%%%%%%%%
-      %'Inductor'         , int64('L'),... %L<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
-      type_val = DeclarationType.Inductor;
-      type_info = DeclarationTypeInfoMap(type_val);
-      syntax = SyntaxProto();
-      syntax.name = type_info.name;
-      syntax.key  = type_info.type;
-      syntax.pattern = {Word('node_plus'),Word('node_minus'),Word('model_name',0),Value('value'),NamedValue('IC',0)};
       out(type_info.type) = syntax;
       
       %%%%%%%%%%
@@ -1361,6 +1351,16 @@ classdef SpiceParser < handle
       out(type_info.type)=syntax;
       
       %%%%%%%%%%
+      %'Inductor'         , int64('L'),... %L<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
+      type_val = DeclarationType.Inductor;
+      type_info = DeclarationTypeInfoMap(type_val);
+      syntax = SyntaxProto();
+      syntax.name = type_info.name;
+      syntax.key  = type_info.type;
+      syntax.pattern = {Word('node_plus'),Word('node_minus'),Word('model_name',0),Value('value'),NamedValue('IC',0)};
+      out(type_info.type) = syntax;
+      
+      %%%%%%%%%%
       %'Mosfet'           , int64('M'),... %M<name> <drain node> <gate node> <source node> <bulk/substrate node> <model name>
       % [L=<value>] [W=<value>]....
       type_val = DeclarationType.Mosfet;
@@ -1370,11 +1370,11 @@ classdef SpiceParser < handle
       syntax.key  = type_info.type;
       
       named_values = {'L','W','AD','AS','PD','PS','NRD','NRS','NRG','NRB','M','N'};
-      named_value_syntaxes = cellfun(@(s)NamedValue(s,0),named_values,'Un',0);
+      named_value_syntax = Word('values');
+      named_value_syntax.pattern = cellfun(@(s)NamedValue(s,0),named_values,'Un',0);
       
       syntax.pattern = {Word('drain'),Word('gate'),Word('source'),Word('substrate'),...
-        Word('model_name')};
-      syntax.pattern = [syntax.pattern,named_value_syntaxes];
+        Word('model_name'),named_value_syntax};
       out(type_info.type) = syntax;
         
       %%%%%%%%%%
@@ -1452,7 +1452,7 @@ classdef SpiceParser < handle
       %...% U<name> <primitive type> ([parameter value]*) <digital power node> <digital ground node> <node>* <timing model name>
       %...% U<name> STIM (<width value>, <format value>) <digital power node> <digital ground node> <node>* <I/O model name> [TIMESTEP=<stepsize value>] <waveform description>
       %TODO fully support parsing Digital primitives, for now there are way too many types
-      type_val = DeclarationType.VSource;
+      type_val = DeclarationType.DigitalPrimitive;
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
@@ -1483,7 +1483,7 @@ classdef SpiceParser < handle
       ac_pattern = Word('AC',0);
       ac_pattern.pattern = {Word('AC',0),Value('magnitude'),Value('phase',0)};
       
-      syntax.pattern = {Word('node_plus'),Word('node_minus'),dc_pattern,ac_pattern,transient_optional_pattern};
+      syntax.pattern = {Word('node_plus'),Word('node_minus'),dc_pattern,ac_pattern,transient_optional_syntax};
       out(type_info.type) = syntax;
       
       %%%%%%%%%%
@@ -1493,7 +1493,7 @@ classdef SpiceParser < handle
       syntax = SyntaxProto();
       syntax.name = type_info.name;
       syntax.key  = type_info.type;
-      syntx.pattern = {...
+      syntax.pattern = {...
         Word('switch_plus') ,Word('switch_minus') ,...
         Word('control_V_device'),Word('model_name')};
       out(type_info.type) = syntax;
@@ -1525,11 +1525,11 @@ classdef SpiceParser < handle
       syntax.key  = type_info.type;
       
       named_values = {'AREA','WB','AGD','KP','TAU'};
-      named_value_syntaxes = cellfun(@(s)NamedValue(s,0),named_values,'Un',0);
+      named_value_syntax = Word('values');
+      named_value_syntax.pattern = cellfun(@(s)NamedValue(s,0),named_values,'Un',0);
       
       syntax.pattern = {Word('collector'),Word('gate'),Word('emitter'),Word('model_name'),...
-        NamedValue('area',0)};
-      syntax.pattern = [syntax.pattern,named_value_syntaxes];
+        NamedValue('area',0),named_value_syntax};
       out(type_info.type) = syntax;
       
       %%%%%%%%%%
