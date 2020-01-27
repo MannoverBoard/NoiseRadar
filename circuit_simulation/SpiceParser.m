@@ -1535,6 +1535,19 @@ classdef SpiceParser < handle
       %%%%%%%%%%
       num_component_declarations = sum([cflat(SpiceParser.DeclarationTypeInfoMap.values).meta_type]==SpiceParser.DeclarationMetaType.Component);
       assert(out.Count==num_component_declarations);
+      
+      %%%%%%%%%%
+      % Directive syntax
+      % TODO actually support directives, for no
+      type_val = DeclarationType.Directive;
+      type_info = DeclarationTypeInfoMap(type_val);
+      syntax = SyntaxProto();
+      syntax.name = type_info.name;
+      syntax.key  = type_info.type;
+      syntax.pattern = {};
+      out(type_info.type) = syntax;
+      
+      assert(out.Count==DeclarationTypeInfoMap.Count);
     end
   end
   % /Static Getters
