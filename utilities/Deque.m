@@ -66,7 +66,11 @@ classdef Deque < handle
     end
     
     function [item] = pop(self)
-      item = self.data(self.index);
+      if iscell(self.data)
+        item = self.data{self.index};
+      else
+        item = self.data(self.index);
+      end
       if self.index > self.min_size_
         %if bigger than it needs to be, then reduce size
         self.data = self.data(1:self.index-1);
