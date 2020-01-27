@@ -54,7 +54,6 @@ classdef SpiceParser < handle
       'Directive' ,7 ,...
       'BJT'       ,8 ,...
       'Mosfet'    ,9 ,...
-      'SubCircuit',10,...
       'User'      ,11,...
       'Resistor'  ,12,...
       'Capacitor' ,13,...
@@ -463,84 +462,95 @@ classdef SpiceParser < handle
         declarations = declarations(1:first_end_directive_index-1);
       end
       
-      %Subcircuit Nesting Logic
-      any_subscircuit_nesting_error = false;
+      %%%%%%%%%
+      %Nested Directive Logic
+      pairing_begin_lgc = [cflat(SpiceParser.DirectiveTypeInfoMap.values).pairing_type]==SpiceParser.DirectivePairingType.Begin;
+      pairing_begin_keys = aindex(cflat(SpiceParser.DirectiveTypeInfoMap.keys),pairing_begin_lgc);
+      
       declaration_types = [declarations.type];
-      directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
-      directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_indices);
-      ends_directives_lgc = (directive_types==DirectiveType.SubCircuitEnd);
-      ends_indices = directive_indices(ends_directives_lgc);
-      
-      begins = (declaration_types==DeclarationType.SubCircuit);
-      ends   = arrayfun(@(i)any(ends_indices==i),1:numel(declarations));
-      level_changes = (begins-ends);
-      levels = zeros(size(level_changes));
-      levels(1) = level_changes(1);
-      for idx=2:numel(levels)
-        levels(idx) = max([0,levels(idx-1)])+level_changes(idx);
-      end
-      
-      %Subcircuits cannot be nested
-      for idx=find(levels>1)
-        any_subscircuit_nesting_error = true;
-        error = SpiceParser.ErrorProto();
-        error.type = 'NestedSubcircuit';
-        error.line_number = declarations(idx).tokens(1).line_number;
-        error.start = declarations(idx).tokens(1).start;
-        error.message = 'Subcircuit definitions cannot be nested.';
-        errors(end+1) = error; %#ok<AGROW>
-      end
-      
-      %All subcircuits must have a matching .ENDS
-      for idx=find(levels<0)
-        any_subscircuit_nesting_error = true;
-        error = SpiceParser.ErrorProto();
-        error.type = 'ExtraSubCircuitEnd';
-        error.line_number = declarations(idx).tokens(1).line_number;
-        error.start = declarations(idx).tokens(1).start;
-        error.message = 'Extra SubCircuit .ENDS  directive.';
-        errors(end+1) = error; %#ok<AGROW>
-      end
-      
-      if levels(end)>0
-        any_subscircuit_nesting_error = true;
-        error = SpiceParser.ErrorProto();
-        error.type = 'MissingSubCircuitEnd';
-        error.line_number = declarations(end).tokens(1).line_number;
-        error.start = declarations(end).tokens(1);
-        error.message = sprintf('Missing %d SubCircuit .ENDS  directive%s.',levels(end),tern(levels(end)>1,'s',''));
-        errors(end+1) = error;
-      end
-      
-      %If on subscircuit nesting errors and either .ENDS or SUBCKT is not supported, then remove the whole groupings
-      if( ~any_subscircuit_nesting_error && ~(SpiceParser.DeclarationTypeInfoMap(DeclarationType.SubCircuit).supported && SpiceParser.DeclarationTypeInfoMap(DeclarationType.SubCircuitEnd)))
-        should_remove = zeros(size(declarations));
-        in_subcircuit = false;
-        subcircuit_indices = [];
-        for idx=1:numel(declarations)
-          decl = declarations(idx);
-          if decl.type==DeclarationType.SubCircuit
-            in_subcircuit=true;
-            subcircuit_indices(end+1) = idx; %#ok<AGROW>
-          elseif decl.type==DeclarationType.Directive && decl.directive_type==DirectiveType.SubCircuitEnd
-            in_subcircuit=false;
-            should_remove(idx)=1;
-          end
-          if in_subcircuit
-            should_remove(idx)=1;
-          end
+      directive_lgc = arrayfun(@(typ)SpiceParser.DeclarationTypeInfoMap(typ).meta_type==SpiceParser.DeclarationMetaType.Directive,declaration_types);
+      directive_idx = find(directive_lgc);
+      directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_idx);
+      for pairing_begin_key = pairing_begin_keys
+        begin_type_info = SpiceParser.DirectiveTypeInfoMap(pairing_begin_key);
+        assert(numel(begin_type_info.reference_types)>=1,'All Directive Type Info %s with pairing type beginning must have a referenced end type',...
+          begin_type_info.name);
+        end_type_info = SpiceParser.DirectiveTypeInfoMap(begin_type_info.reference_types(1));
+        
+        any_nesting_error = false;
+        begin_directives_lgc = (directive_types==begin_type_info.type);
+        begin_directives_idx = directive_idx(begin_directives_lgc);
+        end_directives_lgc = (directive_types==end_type_info.type);
+        end_directives_idx = directive_idx(end_directives_lgc);
+        
+        %%%%%
+        begins = unfind(begin_directives_idx,size(declaration_types));
+        ends   = unfind(end_directives_idx  ,size(declaration_types));
+        %%%%%
+        level_changes = (begins-ends);
+        levels = zeros(size(level_changes));
+        levels(1) = level_changes(1);
+        for idx=2:numel(levels)
+          levels(idx) = max([0,levels(idx-1)])+level_changes(idx);
         end
-        for i=1:numel(subcircuit_indices)
-          idx = subcircuit_indices(i);
-          warning = SpiceParser.ErrorProto();
-          warning.type = 'UnsupportedSubCircuitDeclaration';
-          warning.line_number = declarations(idx).tokens(1).line_number;
-          warning.start = declarations(idx).tokens(1).start;
-          warning.message = 'SubCircuits are not supported, it will be ignored.';
-          warnings(end+1) = warning; %#ok<AGROW>
+        %%%%%
+        %Directives cannot be nested
+        for idx=find(levels>1)
+          any_nesting_error = true;
+          error = SpiceParser.ErrorProto();
+          error.type = 'NestedDirective';
+          error.line_number = declarations(idx).tokens(1).line_number;
+          error.start = declarations(idx).tokens(1).start;
+          error.message = sprintf('%s directives cannot be nested.',begin_type_info.name);
+          errors(end+1) = error; %#ok<AGROW>
         end
-        declarations = declarations(~should_remove);
+        %All nested directives must have a matching end directive
+        for idx=find(levels<0)
+          any_nesting_error = true;
+          error = SpiceParser.ErrorProto();
+          error.type = 'ExtraEndDirective';
+          error.line_number = declarations(idx).tokens(1).line_number;
+          error.start = declarations(idx).tokens(1).start;
+          error.message = sprintf('Extra SubCircuit %s directive.',end_type_info.name);
+          errors(end+1) = error; %#ok<AGROW>
+        end
+        %%%%%
+        
+        %If not any nesting errors and either begin or end directive is not supported, then remove the whole groupings
+        nest_is_supported = (SpiceParser.DirectiveTypeInfoMap(begin_type_info.type).supported && SpiceParser.DirectiveTypeInfoMap(end_type_info.type).supported);
+        if( ~any_nesting_error && ~nest_is_supported )
+          should_remove = zeros(size(declarations));
+          in_nest = false;
+          nest_indices = [];
+          for idx=1:numel(declarations)
+            decl = declarations(idx);
+            if decl.type==DeclarationType.Directive
+              if decl.directive_type == begin_type_info.type
+                in_nest=true;
+                nest_indices(end+1) = idx; %#ok<AGROW>
+              elseif decl.directive_type == end_type_info.type
+                in_nest=false;
+                should_remove(idx)=1;
+              end
+            end
+            if in_nest
+              should_remove(idx) = 1;
+            end
+          end
+          for i=1:numel(nest_indices)
+            idx = nest_indices(i);
+            warning = SpiceParser.ErrorProto();
+            warning.type = 'UnsupportedDirectiveNestGroup';
+            warning.line_number = declarations(idx).tokens(1).line_number;
+            warning.start = declarations(idx).tokens(1).start;
+            warning.message = sprintf('%s are not supported, it will be ignored.',begin_type_info.name);
+            warnings(end+1) = warning; %#ok<AGROW>
+          end
+          declarations = declarations(~should_remove);
+        end
       end
+      % /Nested directive logic
+      %%%%%%%%%
       
       %Remove all unsupported directives and throw warnings for each
       directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
@@ -656,7 +666,6 @@ classdef SpiceParser < handle
       out('\.'    ) = DeclarationType.Directive;
       out('q'     ) = DeclarationType.BJT;
       out('m'     ) = DeclarationType.Mosfet;
-      out('subckt') = DeclarationType.SubCircuit;%TODO this is invalid
       out('y'     ) = DeclarationType.User;
       out('r'     ) = DeclarationType.Resistor;
       out('c'     ) = DeclarationType.Capacitor;
@@ -704,8 +713,7 @@ classdef SpiceParser < handle
 				DeclarationType.User      ,...
 				DeclarationType.Resistor  ,...
 				DeclarationType.Capacitor ,...
-				DeclarationType.Inductor  ,...
-      	DeclarationType.SubCircuit ...%INVALID!
+				DeclarationType.Inductor   ...
     	};
       metatype2types(DeclarationMetaType.Directive) = {...
       	DeclarationType.Directive ,...

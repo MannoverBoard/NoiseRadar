@@ -12,14 +12,24 @@ R5 +1 6 6;
 *R5 1 6 6;
 +FOOFLY
 
-SUBCKT as asdf
+.SUBCKT as asdf
 R1 1 1 1 1  1
 R2 3 43 34 3 3 
 .ENDS
 
 
-SUBCKT
+.SUBCKT AAAAA
 .ENDS
+
+
+.ALIASES asdfasdf
+R5 asdf asdf as df
+.ENDaliAses
+
+.ALIASES asdfaw asdas
+R5 asdf asdf as df
+.ENDaliAses
+
 
 .END
 

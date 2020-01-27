@@ -3,8 +3,8 @@ Directive errors
 C1 3 6 1pF
 
 
-SUBCKT as asdf
-SUBCKT
+.SUBCKT as asdf
+.SUBCKT
 .ENDS
 .ENDS
 
@@ -13,7 +13,7 @@ UNKNOWN DIRECTIVE
 
 .ENDS
 
-SUBCKT
+.SUBCKT
 
 
 .END
