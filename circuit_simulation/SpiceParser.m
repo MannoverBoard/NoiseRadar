@@ -1,39 +1,51 @@
 classdef SpiceParser < handle
-  properties(Constant)
-    esc = @(X)regexptranslate('escape',X);
-    
+  properties(Constant,Hidden)
     uid_type = 'int64';
+  end
+  properties(Constant)  
     
-    linebreak_pattern = '(\r?\n)';
     
-    line_continuation_pattern = '^\s*[+]';%continues from previous line
-    
-    token_delimiter = '\s*';
-    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Error Definitions
     ErrorProto = @()struct('type',[],'line_number',[],'start',[],'message',[]);
     EmptyError = aindex(SpiceParser.ErrorProto(),[]);
+    % /Error Definitions
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
+    identifier_pattern = '[a-zA-Z_][a-zA-Z0-9_]*';
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Line Definitions
+    linebreak_pattern = '(\r?\n)';
+    line_continuation_pattern = '^\s*[+]';%continues from previous line
+    
+    LineProto = @(raw,line_number,start)struct('raw',raw,'line_number',line_number,'start',start);
+    % /Line Definitions
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Token Definitions
     word_pattern = '[-a-zA-Z_0-9+.]+';
     equality_pattern = '[=]';
     list_begin_pattern = [ '[' SpiceParser.esc('(') ']' ];
     list_end_pattern   = [ '[' SpiceParser.esc(')') ']' ];
     comment_pattern = '[*;]';
-    
-    identifier_pattern = '[a-zA-Z_][a-zA-Z0-9_]*';
-    
-    LineProto = @(raw,line_number,start)struct('raw',raw,'line_number',line_number,'start',start);
+    parameter_list_begin = '[:]';
     
     TokenType = struct(...
-      'Word'     ,0,...
-      'Equality' ,1,...
-      'ListBegin',2,...
-      'ListEnd'  ,3,...
-      'Comment'  ,4 ...
+      'Word'         ,0,...
+      'Equality'     ,1,...
+      'ListBegin'    ,2,...
+      'ListEnd'      ,3,...
+      'Comment'      ,4,...
+      'ParameterList',5 ...
     );
     TokenTypeMap = SpiceParser.getTokenTypeMap();
     TokenTypeKeys = SpiceParser.TokenTypeMap.keys;
 		TokenProto = @()struct('type',[],'raw',[],'line_number',[],'start',[]);
     EmptyToken = aindex(SpiceParser.TokenProto(),[]);
+    % /Token Definitions
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Declaration Information
@@ -42,34 +54,43 @@ classdef SpiceParser < handle
       'Directive', 1 ...
     );
     DeclarationMetaMap = SpiceParser.structToMap(SpiceParser.DeclarationMetaType);
-    
+    %<> required
+    %<>* one or more required
+    %[] Optional
+    %[]* zero or more optional
+    %<|> required choice
+    %[|] optional choice
     DeclarationType = struct(...
-      'GaAsFET'          , int64('B'),...
-      'Capacitor'        , int64('C'),...
-      'Diode'            , int64('D'),...
-      'VcVsource'        , int64('E'),...
-      'IcISource'        , int64('F'),...
-      'VcISource'        , int64('G'),...
-      'IcVSource'        , int64('H'),...
-      'ISource'          , int64('I'),...
-      'JFET'             , int64('J'),...
-      'Inductor'         , int64('L'),...
+      'GaAsFET'          , int64('B'),... %B<name> <drain node> <gate node> <source node> <model name> [area value] 
+      'Capacitor'        , int64('C'),... %C<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
+      'Diode'            , int64('D'),... %D<name> <anode node> <cathode node> <model name> [area value]
+      'VcVsource'        , int64('E'),... %E<name> <+ node> <- node> <+ controlling node> <- controlling node> <gain>
+      'IcISource'        , int64('F'),... %F<name> <+ node> <- node> <controlling V device name> <gain>
+      'VcISource'        , int64('G'),... %G<name> <+ node> <- node> <+ controlling node> <- controlling node> <transconductance>
+      'IcVSource'        , int64('H'),... %H<name> <+ node> <- node> <controlling V device name> <transresistance>
+      'ISource'          , int64('I'),... %I<name> <+ node> <- node> [[DC] <value>] [AC <magnitude value> [phase value]] [transient specification]
+      'JFET'             , int64('J'),... %J<name> <drain node> <gate node> <source node> <model name> [area value]
+      'Inductor'         , int64('L'),... %L<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
       'Coupling'         , int64('K'),...
       ... %Inductor Coupling K LL
+      ...  %K<name> L<inductor name> <L<inductor name>>* + <coupling value>
+      ...  %K<name> <L<inductor name>>* <coupling value> + <model name> [size value]
       ... %TransmissionLine Coupling K TT
+      ...  %K<name> T<line name> <T<line name>>* CM=<coupling capacitance> LM=<coupling inductance>
       'MOSFET'           , int64('M'),...
-      'DigitalInput'     , int64('N'),...
-      'DigitalOutput'    , int64('O'),...
-      'BipolarTransistor', int64('Q'),... %BJT
-      'Resistor'         , int64('R'),...
-      'VcSwitch'         , int64('S'),...
-      'TransmissionLine' , int64('T'),...
+      'DigitalInput'     , int64('N'),... %N<name> <interface node> <low level node> <high level node> <model name> <input specification>
+      'DigitalOutput'    , int64('O'),... %O<name> <interface node> <low level node> <high level node> <model name> <output specification>
+      'BipolarTransistor', int64('Q'),... %Q<name> <collector node> <base node> <emitter node> [substrate node] <model name> [area value]
+      'Resistor'         , int64('R'),... %R<name> <+ node> <- node> [model name] <value> [TC=<linear temp. coefficient>[,<quadratic temp. coefficient]]
+      'VcSwitch'         , int64('S'),... %S<name> <+ switch node> <- switch node> <+ controlling node> <- controlling node> <model name>
+      'TransmissionLine' , int64('T'),... %T<name> <A port + node> <A port - node> <B port + node> <B port - node> <ideal or lossy specification>
       'DigitalPrimitive' , int64('U'),...
-      ...%'Stimulus' ,'U STIM'
-      'VSource'          , int64('V'),...
-      'IcSwitch'         , int64('W'),...
-      'Subcircuit'       , int64('X'),...
-      'IGBT'             , int64('Z'),...
+      ...% U<name> <primitive type> ([parameter value]*) <digital power node> <digital ground node> <node>* <timing model name>
+      ...% U<name> STIM (<width value>, <format value>) <digital power node> <digital ground node> <node>* <I/O model name> [TIMESTEP=<stepsize value>] <waveform description>
+      'VSource'          , int64('V'),... %V<name> <+ node> <- node> [[DC] <value>] [AC <magnitude value> [phase value]] [transient specification]
+      'IcSwitch'         , int64('W'),... %W<name> <+ switch node> <- switch node> <controlling V device name> <model name>
+      'Subcircuit'       , int64('X'),... %X<name> [node]* <subcircuit name> [PARAMS: <<name>=<value>>*] [TEXT:<<name>=<text value>>*]
+      'IGBT'             , int64('Z'),... %Z<name> <collector> <gate> <emitter> <model name> [AREA=<value>] [WB=<value>] [AGD=<value>] [KP=<value>] [TAU=<value>]
       'Directive'        , int64('.') ...
     );
     DeclarationTypeMap = SpiceParser.getDeclarationTypeMap();
@@ -225,51 +246,9 @@ classdef SpiceParser < handle
     ValueSuffixMap = SpiceParser.getValuesSuffixMap();
     ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
   end
-%   classdef DeclarationType
-%     enumeration 
-%       VSource 
-%        
-%       %;current flows through the source from node n+ to node n-
-%       %type [DC| ] blank is DC etc..
-%       %ac 1 dc 0
-%       %E<name> <nout+> <nout-> <nc+> <nc-> <gain>
-%       %G<name> <nout+> <nout-> (<nc+>,<nc->) <gain>
-%       %F<name> <nout+> <nout-> <vcontrol> <gain>
-%       %H<name> <nout+> <nout-> <vcontrol> <gain>
-%       %D<name> <n+> <n-> <model-name>
-%       
-%       %Model directive 
-%       %.MODEL <model-name> Character ( [parameter = value] ...)
-%       %Q<name> <nc> <nb> <ne> <model-name>
-%       %.MODEL <model-name> <npn | pnp> ( [parameter = value] ...)
-%       %M<name> <nd> <ng> <ns> <nb> <model-name> [L=value] [W=value]
-%       %.MODEL <model-name> <nmos | pmos> ( [parameter = value] ...)
-%       ;%SUBCKT <SubName> <N1> <N2> ... ... 
-%     end
-%   end
-%   enumeration DirectiveType
-    %.Model
-    %.ENDS
-    %.END
-    %.AC%.AC <type> <npts> <f-start> <f-end>
-    %type LIN,DEC,OCT
-    %.DC [LIN] <var1> <s1> <e1> <d1> [<var2> <s2> <e2> <d2>]
-    %.DC <DEC | OCT>] <var1> <s1> <e1> <np1> [<var2> ...]
-    %.DC <var1> LIST <val1> <val2> [...] [<var2> ...]
-    %.TF <var-out> <source-in>
-    %.OP 
-    %.ENDS
-    %.TRAN[/OP] <print-inc> <t-end> [print-start] [UIC]
-    %EXP( <v1> <v2> [Td1 [Tau1 [Td2 [Tau2]]]])
-    %PULSE( <v1> <v2> [Td [Tr [Tf [pw [tau]]]]])
-    %PWL ( <t1> <v1> [t2 v2 [t3 v3 ...]] )
-    %SIN ( <v0> <va> [f [Td [df [phi]]]])
-    %.PRINT <type> <OV1> <OV2> <Ov3> ...
-    %M: Magnitude
-    %DB: Magnitude in dB P: Phase
-    %R: Real part
-    %I: Imaginary part
-%   end
+  
+  
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   methods(Static)
   	
     function [text] = readFile(filename)
@@ -625,33 +604,25 @@ classdef SpiceParser < handle
       end
       declarations = declarations(~unsupported_declarations_lgc);
     end
-    
-    function [components,errors,warnings] = componentsFromDeclarations(declarations)
-      %Remove subscircuit -> .ends first
-      
-      %Remove 
-%        'VSource'   ,0 ,... %V<name> <n+> <n-> [type] <val>
-%       'ISource'   ,1 ,... %I<name> <n+> <n-> [type] <val> TransientSourceType
-%       'VcVSource' ,2 ,...
-%       'VcISource' ,3 ,...
-%       'IcVSource' ,4 ,...
-%       'IcISource' ,5 ,...
-%       'Diode'     ,6 ,...
-%       'Directive' ,7 ,...
-%       'BJT'       ,8 ,...
-%       'Mosfet'    ,9 ,...
-%       'SubCircuit',10,...
-%       'User'      ,11,...
-%       'Resistor'  ,12,...
-%       'Capacitor' ,13,...
-%       'Inductor'  ,14 ...
+  end
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  % Utitity Functions
+  methods(Static,Hidden)
+    function [Y] = esc(X)
+      if nargin<1 || isempty(X)
+        Y = X;
+      else
+        Y = regexptranslate('escape',X);
+      end
     end
     
  		function [values] = parseValue(strs)
  			groups = cflat(regexp(strs,SpiceParser.ValuePattern,'tokens'));
  			values = cellfun(@(group)tern(isempty(group),nan,@()str2double(group{1}).*SpiceParser.ValueSuffixMap(group{2})),groups);
- 		end
- 		
+    end
+    
     function [out] = structToMap(strct)
       fns = fieldnames(strct);
       lfns = cellfun(@lower,fns,'Un',0);
@@ -660,6 +631,7 @@ classdef SpiceParser < handle
         out(lfns{i}) = strct.(fns{i});
       end
     end
+    
     function [out] = addTypeInfoToMap(Type,Map,InfoProto,map)
       if nargin<4 || isempty(map)
         out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
@@ -684,6 +656,14 @@ classdef SpiceParser < handle
         out(typeval) = entry;
       end
     end
+  end
+  % /Utitity Functions
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  % Static Getters
+  methods(Static,Hidden)
+ 		
     function [out] = getValuesSuffixMap()
       out = containers.Map('KeyType','char','ValueType','double');
       out('f')     = 1e-15;
@@ -711,11 +691,12 @@ classdef SpiceParser < handle
     function [out] = getTokenTypeMap()
       out = containers.Map('KeyType','char','ValueType','double');
       TokenType = SpiceParser.TokenType;
-      out(SpiceParser.word_pattern      ) = TokenType.Word;
-      out(SpiceParser.equality_pattern  ) = TokenType.Equality;
-      out(SpiceParser.list_begin_pattern) = TokenType.ListBegin;
-      out(SpiceParser.list_end_pattern  ) = TokenType.ListEnd;
-      out(SpiceParser.comment_pattern   ) = TokenType.Comment;
+      out(SpiceParser.word_pattern        ) = TokenType.Word;
+      out(SpiceParser.equality_pattern    ) = TokenType.Equality;
+      out(SpiceParser.list_begin_pattern  ) = TokenType.ListBegin;
+      out(SpiceParser.list_end_pattern    ) = TokenType.ListEnd;
+      out(SpiceParser.comment_pattern     ) = TokenType.Comment;
+      out(SpiceParser.parameter_list_begin) = TokenType.ParameterList;
       assert(out.Count==numel(fieldnames(TokenType)));
     end
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -973,4 +954,7 @@ classdef SpiceParser < handle
     % /Model Type Static Getters
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end
+  % /Static Getters
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  
  end
