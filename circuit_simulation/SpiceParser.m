@@ -67,7 +67,7 @@ classdef SpiceParser < handle
     %<|> required choice
     %[|] optional choice
     DeclarationType = struct(...
-      'GaAsFET'          , int64('B'),... %B<name> <drain node> <gate node> <source node> <model name> [area value] 
+      'Gaasfet'          , int64('B'),... %B<name> <drain node> <gate node> <source node> <model name> [area value] 
       'Capacitor'        , int64('C'),... %C<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
       'Diode'            , int64('D'),... %D<name> <anode node> <cathode node> <model name> [area value]
       'VcVsource'        , int64('E'),... %E<name> <+ node> <- node> <+ controlling node> <- controlling node> <gain>
@@ -75,7 +75,7 @@ classdef SpiceParser < handle
       'VcISource'        , int64('G'),... %G<name> <+ node> <- node> <+ controlling node> <- controlling node> <transconductance>
       'IcVSource'        , int64('H'),... %H<name> <+ node> <- node> <controlling V device name> <transresistance>
       'ISource'          , int64('I'),... %I<name> <+ node> <- node> [[DC] <value>] [AC <magnitude value> [phase value]] [transient specification]
-      'JFET'             , int64('J'),... %J<name> <drain node> <gate node> <source node> <model name> [area value]
+      'Jfet'             , int64('J'),... %J<name> <drain node> <gate node> <source node> <model name> [area value]
       'Inductor'         , int64('L'),... %L<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
       'Coupling'         , int64('K'),...
       ... %Inductor Coupling K LL
@@ -83,10 +83,10 @@ classdef SpiceParser < handle
       ...  %K<name> <L<inductor name>>* <coupling value> <model name> [size value]
       ... %TransmissionLine Coupling K TT
       ...  %K<name> T<line name> <T<line name>>* CM=<coupling capacitance> LM=<coupling inductance>
-      'MOSFET'           , int64('M'),...
+      'Mosfet'           , int64('M'),...
       'DigitalInput'     , int64('N'),... %N<name> <interface node> <low level node> <high level node> <model name> <input specification>
       'DigitalOutput'    , int64('O'),... %O<name> <interface node> <low level node> <high level node> <model name> <output specification>
-      'BipolarTransistor', int64('Q'),... %Q<name> <collector node> <base node> <emitter node> [substrate node] <model name> [area value]
+      'Bjt'              , int64('Q'),... %Q<name> <collector node> <base node> <emitter node> [substrate node] <model name> [area value]
       'Resistor'         , int64('R'),... %R<name> <+ node> <- node> [model name] <value> [TC=<linear temp. coefficient>[,<quadratic temp. coefficient]]
       'VcSwitch'         , int64('S'),... %S<name> <+ switch node> <- switch node> <+ controlling node> <- controlling node> <model name>
       'TransmissionLine' , int64('T'),... %T<name> <A port + node> <A port - node> <B port + node> <B port - node> <ideal or lossy specification>
@@ -96,7 +96,7 @@ classdef SpiceParser < handle
       'VSource'          , int64('V'),... %V<name> <+ node> <- node> [[DC] <value>] [AC <magnitude value> [phase value]] [transient specification]
       'IcSwitch'         , int64('W'),... %W<name> <+ switch node> <- switch node> <controlling V device name> <model name>
       'Subcircuit'       , int64('X'),... %X<name> [node]* <subcircuit name> [PARAMS: <<name>=<value>>*] [TEXT:<<name>=<text value>>*]
-      'IGBT'             , int64('Z'),... %Z<name> <collector> <gate> <emitter> <model name> [AREA=<value>] [WB=<value>] [AGD=<value>] [KP=<value>] [TAU=<value>]
+      'Igbt'             , int64('Z'),... %Z<name> <collector> <gate> <emitter> <model name> [AREA=<value>] [WB=<value>] [AGD=<value>] [KP=<value>] [TAU=<value>]
       'Directive'        , int64('.') ...
     );
     DeclarationTypeMap = SpiceParser.getDeclarationTypeMap();
@@ -194,20 +194,7 @@ classdef SpiceParser < handle
     IndependentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndependentSourceTypes);
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    ModelType = struct(...
-      'Diode', 0,...
-      'Npn'  , 1,...
-      'Pnp'  , 2,...
-      'Nmos' , 3,...
-      'Pmos' , 4 ...
-    );
     ModelTypeMap = SpiceParser.getModelTypeMap();
-    ModelTypeInfoProto = SpiceParser.GenericInfoProto;
-    ModelTypeInfoMap = SpiceParser.addTypeInfoToMap(...
-      SpiceParser.ModelType          ,...
-      SpiceParser.ModelTypeMap       ,...
-      SpiceParser.ModelTypeInfoProto  ...
-    );
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     IndepdentSourceType          = struct('Dc',0,'Ac',1);
     IndepdentSourceTypeMap       = SpiceParser.structToMap(SpiceParser.IndepdentSourceType);
@@ -260,7 +247,7 @@ classdef SpiceParser < handle
       'FrequencyModulated', 3,...
       'Sinusoidal'        , 4 ...
     );    
-    TransientTypeMap = SpiceParser.geTransientTypeInfoMap();
+    TransientTypeMap = SpiceParser.getTransientTypeMap();
     TransientTypeInfoProto = SpiceParser.GenericInfoProto;
     TransientTypeInfoMap = SpiceParser.addTypeInfoToMap(...
       SpiceParser.TransientType         ,...
@@ -745,7 +732,7 @@ classdef SpiceParser < handle
       DeclarationMetaType = SpiceParser.DeclarationMetaType;
       DeclarationType     = SpiceParser.DeclarationType;
       metatype2types(DeclarationMetaType.Component) = {...
-        DeclarationType.GaAsFET          , ...
+        DeclarationType.Gaasfet          , ...
         DeclarationType.Capacitor        , ...
         DeclarationType.Diode            , ...
         DeclarationType.VcVsource        , ...
@@ -753,13 +740,13 @@ classdef SpiceParser < handle
         DeclarationType.VcISource        , ...
         DeclarationType.IcVSource        , ...
         DeclarationType.ISource          , ...
-        DeclarationType.JFET             , ...
+        DeclarationType.Jfet             , ...
         DeclarationType.Inductor         , ...
         DeclarationType.Coupling         , ...
-        DeclarationType.MOSFET           , ...
+        DeclarationType.Mosfet           , ...
         DeclarationType.DigitalInput     , ...
         DeclarationType.DigitalOutput    , ...
-        DeclarationType.BipolarTransistor, ...
+        DeclarationType.Bjt              , ...
         DeclarationType.Resistor         , ...
         DeclarationType.VcSwitch         , ...
         DeclarationType.TransmissionLine , ...
@@ -767,7 +754,7 @@ classdef SpiceParser < handle
         DeclarationType.VSource          , ...
         DeclarationType.IcSwitch         , ...
         DeclarationType.Subcircuit       , ...
-        DeclarationType.IGBT               ...
+        DeclarationType.Igbt               ...
       };
       metatype2types(DeclarationMetaType.Directive) = {...
       	DeclarationType.Directive ,...
@@ -965,25 +952,49 @@ classdef SpiceParser < handle
     % Model Type Static Getters
     function [out] = getModelTypeMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
-      ModelType = SpiceParser.ModelType;
-      out('d'   ) = ModelType.Diode;
-      out('npn' ) = ModelType.Npn;
-      out('pnp' ) = ModelType.Pnp;
-      out('nmos') = ModelType.Nmos;
-      out('pmos') = ModelType.Pmos;
-      assert(out.Count==numel(fieldnames(ModelType)));
+      DeclarationType = SpiceParser.DeclarationType;
+      out('Gaasfet'  ) = DeclarationType.Gaasfet;
+      out('CAP'      ) = DeclarationType.Capacitor;
+      out('D'        ) = DeclarationType.Diode;
+      out('NJF'      ) = DeclarationType.Jfet;
+      out('PJF'      ) = DeclarationType.Jfet;
+      out('CORE'     ) = DeclarationType.Coupling;%Transmission line coupling
+      out('IND'      ) = DeclarationType.Inductor;
+      out('NMOS'     ) = DeclarationType.Mosfet;
+      out('PMOS'     ) = DeclarationType.Mosfet;
+      out('NPN'      ) = DeclarationType.Bjt;
+      out('PNP'      ) = DeclarationType.Bjt;
+      out('LPNP'     ) = DeclarationType.Bjt;
+      out('RES'      ) = DeclarationType.Resistor;
+      out('VSWITCH'  ) = DeclarationType.VcSwitch;
+      out('TRN'      ) = DeclarationType.TransmissionLine;%Lossy Transmission line
+      out('ISWITCH'  ) = DeclarationType.IcSwitch;
+      out('NIgbt'    ) = DeclarationType.Igbt;
+      
+      out('UIO'      ) = DeclarationType.DigitalPrimitive;
+      out('UTGATE'   ) = DeclarationType.DigitalPrimitive;%Tristate gate
+      out('UEFF'     ) = DeclarationType.DigitalPrimitive;%Edge triggered flip-flop
+      out('UDLY'     ) = DeclarationType.DigitalPrimitive;%Delay line
+      out('UROM'     ) = DeclarationType.DigitalPrimitive;%Real only memory
+      out('UADC'     ) = DeclarationType.DigitalPrimitive;%ADC
+      out('UDAC'     ) = DeclarationType.DigitalPrimitive;%DAC
+      out('UGATE'    ) = DeclarationType.DigitalPrimitive;%Logic expression
+      
+      out('DINPUT'   ) = DeclarationType.DigitalInput;%Digital Input N Device
+      out('DOUTPUT'  ) = DeclarationType.DigitalOutput;%Digital Output N Device
     end
     % /Model Type Static Getters
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    function [out] = geTransientTypeInfoMap()
+    function [out] = getTransientTypeMap()
+      out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
       TransientType = SpiceParser.TransientType;
-      out('EXP'   ) = ModelType.Exponential;
-      out('PULSE' ) = ModelType.Pulse;
-      out('PWL'   ) = ModelType.PiecewiseLinear;
-      out('SFFM'  ) = ModelType.FrequencyModulated;
-      out('SIN'   ) = ModelType.Sinusoidal;
+      out('EXP'   ) = TransientType.Exponential;
+      out('PULSE' ) = TransientType.Pulse;
+      out('PWL'   ) = TransientType.PiecewiseLinear;
+      out('SFFM'  ) = TransientType.FrequencyModulated;
+      out('SIN'   ) = TransientType.Sinusoidal;
       assert(out.Count==numel(fieldnames(TransientType)));
     end
     function [out] = getStimulusSyntaxMap()
@@ -1174,8 +1185,8 @@ classdef SpiceParser < handle
       %[|] optional choice
       
       %%%%%%%%%%
-      %'GaAsFET'          , int64('B'),... %B<name> <drain node> <gate node> <source node> <model name> [area value] 
-      type_val = DeclarationType.GaAsFet;
+      %'Gaasfet'          , int64('B'),... %B<name> <drain node> <gate node> <source node> <model name> [area value] 
+      type_val = DeclarationType.Gaasfet;
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
@@ -1283,8 +1294,8 @@ classdef SpiceParser < handle
         {dc_pattern},{ac_pattern}];
       
       %%%%%%%%%%
-      %'JFET'             , int64('J'),... %J<name> <drain node> <gate node> <source node> <model name> [area value]
-      type_val = DeclarationType.GaAsFet;
+      %'Jfet'             , int64('J'),... %J<name> <drain node> <gate node> <source node> <model name> [area value]
+      type_val = DeclarationType.Gaasfet;
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
@@ -1313,10 +1324,10 @@ classdef SpiceParser < handle
 %       ...  %K<name> <L<inductor name>>* <coupling value> <model name> [size value]
 %       ... %TransmissionLine Coupling K TT
 %       ...  %K<name> T<line name> <T<line name>>* CM=<coupling capacitance> LM=<coupling inductance>
-%       'MOSFET'           , int64('M'),...
+%       'Mosfet'           , int64('M'),...
 %       'DigitalInput'     , int64('N'),... %N<name> <interface node> <low level node> <high level node> <model name> <input specification>
 %       'DigitalOutput'    , int64('O'),... %O<name> <interface node> <low level node> <high level node> <model name> <output specification>
-%       'BipolarTransistor', int64('Q'),... %Q<name> <collector node> <base node> <emitter node> [substrate node] <model name> [area value]
+%       'Bjt', int64('Q'),... %Q<name> <collector node> <base node> <emitter node> [substrate node] <model name> [area value]
       
       %%%%%%%%%%
       %'Resistor'         , int64('R'),... %R<name> <+ node> <- node> [model name] <value> [TC=<linear temp. coefficient>[,<quadratic temp. coefficient]]
@@ -1407,8 +1418,8 @@ classdef SpiceParser < handle
 %'Subcircuit'       , int64('X'),... %X<name> [node]* <subcircuit name> [PARAMS: <<name>=<value>>*] [TEXT:<<name>=<text value>>*]
       
       %%%%%%%%%%
-      %'IGBT'             , int64('Z'),... %Z<name> <collector> <gate> <emitter> <model name> [AREA=<value>] [WB=<value>] [AGD=<value>] [KP=<value>] [TAU=<value>]
-      type_val = DeclarationType.IGBT;
+      %'Igbt'             , int64('Z'),... %Z<name> <collector> <gate> <emitter> <model name> [AREA=<value>] [WB=<value>] [AGD=<value>] [KP=<value>] [TAU=<value>]
+      type_val = DeclarationType.Igbt;
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
