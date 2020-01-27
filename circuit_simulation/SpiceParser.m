@@ -60,12 +60,6 @@ classdef SpiceParser < handle
       'Directive', 1 ...
     );
     DeclarationMetaMap = SpiceParser.structToMap(SpiceParser.DeclarationMetaType);
-    %<> required
-    %<>* one or more required
-    %[] Optional
-    %[]* zero or more optional
-    %<|> required choice
-    %[|] optional choice
     DeclarationType = struct(...
       'Gaasfet'          , int64('B'),... %B<name> <drain node> <gate node> <source node> <model name> [area value] 
       'Capacitor'        , int64('C'),... %C<name> <+ node> <- node> [model name] <value> [IC=<initial value>]
@@ -83,7 +77,7 @@ classdef SpiceParser < handle
       ...  %K<name> <L<inductor name>>* <coupling value> <model name> [size value]
       ... %TransmissionLine Coupling K TT
       ...  %K<name> T<line name> <T<line name>>* CM=<coupling capacitance> LM=<coupling inductance>
-      'Mosfet'           , int64('M'),...
+      'Mosfet'           , int64('M'),... %M<name> <drain node> <gate node> <source node> + <bulk/substrate node> <model name>
       'DigitalInput'     , int64('N'),... %N<name> <interface node> <low level node> <high level node> <model name> <input specification>
       'DigitalOutput'    , int64('O'),... %O<name> <interface node> <low level node> <high level node> <model name> <output specification>
       'Bjt'              , int64('Q'),... %Q<name> <collector node> <base node> <emitter node> [substrate node] <model name> [area value]
@@ -241,11 +235,11 @@ classdef SpiceParser < handle
   properties(Constant)%,Hidden
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     TransientType = struct(...
-      'Exponential'       , 0,...
-      'Pulse'             , 1,...
-      'PiecewiseLinear'   , 2,...
-      'FrequencyModulated', 3,...
-      'Sinusoidal'        , 4 ...
+      'Exponential'        , 0,...
+      'Pulse'              , 1,...
+      'PiecewiseLinear'    , 2,...
+      'FrequencyModulation', 3,...
+      'Sinusoidal'         , 4 ...
     );    
     TransientTypeMap = SpiceParser.getTransientTypeMap();
     TransientTypeInfoProto = SpiceParser.GenericInfoProto;
@@ -254,6 +248,7 @@ classdef SpiceParser < handle
       SpiceParser.TransientTypeMap      ,...
       SpiceParser.TransientTypeInfoProto ...
     );
+    TransientTypeSyntaxMap = SpiceParser.getTransientTypeSyntaxMap();
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end  
   
@@ -671,7 +666,6 @@ classdef SpiceParser < handle
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   % Static Getters
   methods(Static)%,Hidden)
- 		
     function [out] = getValuesSuffixMap()
       out = containers.Map('KeyType','char','ValueType','double');
       out('f')     = 1e-15;
@@ -692,7 +686,6 @@ classdef SpiceParser < handle
       out('giga')  = 1e+9;
       out('t')     = 1e+12;
       out('tera')  = 1e+12;
-      
       out('mil')   = 25.4e-6;
       out('')      = 1.;%empty
     end
@@ -993,11 +986,11 @@ classdef SpiceParser < handle
       out('EXP'   ) = TransientType.Exponential;
       out('PULSE' ) = TransientType.Pulse;
       out('PWL'   ) = TransientType.PiecewiseLinear;
-      out('SFFM'  ) = TransientType.FrequencyModulated;
+      out('SFFM'  ) = TransientType.FrequencyModulation;
       out('SIN'   ) = TransientType.Sinusoidal;
       assert(out.Count==numel(fieldnames(TransientType)));
     end
-    function [out] = getStimulusSyntaxMap()
+    function [out] = getTransientTypeSyntaxMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
       
       TransientType = SpiceParser.TransientType;
@@ -1012,16 +1005,17 @@ classdef SpiceParser < handle
       
       %%%%%%%%%%
       %EXP (<i1> <i2> <td1> <tc1> <td2> <tc2>)
-      type_val = TransientType.Exponetial;
+      type_val = TransientType.Exponential;
       type_info = TransientTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,{type_info.name},SyntaxPattern.ListBegin,...
         RequiredValueSyntax('initial'),RequiredValueSyntax('peak'),...
         OptionalValueSyntax('rise_delay'),OptionalValueSyntax('rise_time_constant'),...
         OptionalValueSyntax('fall_delay'),OptionalValueSyntax('fall_time_constant'),...
-        Syntax.ListEnd ];
+        SyntaxPattern.ListEnd ];
       out(type_val) = syntax;
       
       %%%%%%%%%%
@@ -1030,12 +1024,13 @@ classdef SpiceParser < handle
       type_info = TransientTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,{type_info.name},SyntaxPattern.ListBegin,...
         RequiredValueSyntax('initial'),RequiredValueSyntax('pulsed'),...
         OptionalValueSyntax('delay'),OptionalValueSyntax('fall_time'),...
         OptionalValueSyntax('rise_time'),OptionalValueSyntax('pulse_width'),...
-        OptionalValueSyntax('period'),Syntax.ListEnd ];
+        OptionalValueSyntax('period'),SyntaxPattern.ListEnd ];
       out(type_val) = syntax;
       
       %%%%%%%%%%
@@ -1044,6 +1039,7 @@ classdef SpiceParser < handle
       type_info = TransientTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       point_syntax = SyntaxProto();
       point_syntax.pattern = {SyntaxPattern.ListBegin,SyntaxPattern.Value, ...
@@ -1065,7 +1061,7 @@ classdef SpiceParser < handle
       
       loop_body = SyntaxProto();
       loop_body.choices = true;
-      loop_body.pattern = {repeat_for_n,repeat_forever};
+      loop_body.pattern = {for_n,forever};
       
       loop = SyntaxProto();
       loop.pattern = {'Repeat',loop_body,'EndRepeat'};
@@ -1094,12 +1090,13 @@ classdef SpiceParser < handle
       type_info = TransientTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,{type_info.name},SyntaxPattern.ListBegin,...
         RequiredValueSyntax('offset'),RequiredValueSyntax('amplitude'),...
         OptionalValueSyntax('carrier_frequency'),OptionalValueSyntax('modulation_index'),...
         OptionalValueSyntax('modulation_frequency'),...
-        Syntax.ListEnd ];
+        SyntaxPattern.ListEnd ];
       out(type_val) = syntax;
       
       %%%%%%%%%%
@@ -1108,40 +1105,42 @@ classdef SpiceParser < handle
       type_info = TransientTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,{type_info.name},SyntaxPattern.ListBegin,...
         RequiredValueSyntax('offset'),RequiredValueSyntax('amplitude'),...
         OptionalValueSyntax('frequency'),OptionalValueSyntax('delay'),...
         OptionalValueSyntax('damping_factor'),OptionalValueSyntax('phase'),...
-        Syntax.ListEnd ];
+        SyntaxPattern.ListEnd ];
       out(type_val) = syntax;
       
       %%%%%%%%%%
-      assert(out.Count==numel(fieldnamed(TransientType)));
+      assert(out.Count==numel(fieldnames(TransientType)));
     end
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end
   properties(Constant)%,Hidden)
     ValueSuffixMap = SpiceParser.getValuesSuffixMap();
     ValuePattern = ['^([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(@SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
+    PositiveValuePattern = ['^([+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' strjoin(cellfun(@SpiceParser.esc,SpiceParser.ValueSuffixMap.keys,'Un',0),'|') ')?'];
     
-    SyntaxProto = @()struct('name',[],'required_min',1,'required_max',1,'choices',false,...
-      'pattern',{},'ordered',true);
+    SyntaxProto = @()struct('name',[],'key',[],'required_min',1,'required_max',1,'choices',false,...
+      'pattern',[],'ordered',true);
     
     RequiredWordSyntax = @(name)struct('name',name,'required_min',1,'required_max',1,'choices',false,...
-      'pattern',{SyntaxPattern.Word},'ordered',true);
+      'pattern',{SpiceParser.SyntaxPattern.Word},'ordered',true);
     OptionalWordSyntax = @(name)struct('name',name,'required_min',0,'required_max',1,'choices',false,...
-      'pattern',{SyntaxPattern.Word},'ordered',true);
+      'pattern',{SpiceParser.SyntaxPattern.Word},'ordered',true);
     
     RequiredValueSyntax = @(name)struct('name',name,'required_min',1,'required_max',1,'choices',false,...
-      'pattern',{SyntaxPattern.Value},'ordered',true);
+      'pattern',{SpiceParser.SyntaxPattern.Value},'ordered',true);
     OptionalValueSyntax = @(name)struct('name',name,'required_min',0,'required_max',1,'choices',false,...
-      'pattern',{SyntaxPattern.Value},'ordered',true);
+      'pattern',{SpiceParser.SyntaxPattern.Value},'ordered',true);
     
     RequiredNamedValueSyntax = @(name)struct('name',name,'required_min',1,'required_max',1,'choices',false,...
-      'pattern',{name,SyntaxPattern.Equality,SyntaxPattern.Value},'ordered',true);
+      'pattern',{name,SpiceParser.SyntaxPattern.Equality,SpiceParser.SyntaxPattern.Value},'ordered',true);
     OptionalNamedValueSyntax = @(name)struct('name',name,'required_min',0,'required_max',1,'choices',false,...
-      'pattern',{name,SyntaxPattern.Equality,SyntaxPattern.Value},'ordered',true);
+      'pattern',{name,SpiceParser.SyntaxPattern.Equality,SpiceParser.SyntaxPattern.Value},'ordered',true);
     
     SyntaxPattern = struct(...
       'Word'              , SpiceParser.word_pattern        , ...
@@ -1151,7 +1150,8 @@ classdef SpiceParser < handle
       'ListEnd'           , SpiceParser.list_end_pattern    , ...
       'ParameterListBegin', SpiceParser.parameter_list_begin, ...
       'CommaSeparator'    , SpiceParser.comma_separator     , ...
-      'Value'             , SpiceParser.ValuePattern          ...
+      'Value'             , SpiceParser.ValuePattern        , ...
+      'PositiveValue'     , SpiceParser.PositiveValuePattern  ...
     );
   end
   methods(Static)
@@ -1171,18 +1171,17 @@ classdef SpiceParser < handle
       RequiredNamedValueSyntax = @(varargin){SpiceParser.RequiredNamedValueSyntax(varargin{:})};
       OptionalNamedValueSyntax = @(varargin){SpiceParser.OptionalNamedValueSyntax(varargin{:})};
       
-      pm_nodes_required = {RequiredWordSyntax('node_plus'),RequiredWordSyntax('node_minus')};
-            
-      ic_optional = OptionalNamedValueSyntax('IC');
-      
-      %     SyntaxProto = @()struct('name',[],'required_min',0,'required_max',0,'choices',false,...
-      %       'pattern',[],'ordered',true);
       %<> required
       %<>* one or more required
       %[] Optional
       %[]* zero or more optional
       %<|> required choice
       %[|] optional choice
+      transient_syntax = SyntaxProto();
+      transient_syntax.required_min = 0;
+      transient_syntax.required_max = 1;
+      transient_syntax.choices = true;
+      transient_syntax.pattern = SpiceParser.TransientTypeSyntaxMap.values;
       
       %%%%%%%%%%
       %'Gaasfet'          , int64('B'),... %B<name> <drain node> <gate node> <source node> <model name> [area value] 
@@ -1190,6 +1189,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern, ...
         RequiredWordSyntax('drain'), RequiredWordSyntax('gate'), RequiredWordSyntax('source'), ...
@@ -1202,6 +1202,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('node_plus'),RequiredWordSyntax('node_minus'),...
@@ -1215,6 +1216,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('anode'),RequiredWordSyntax('cathode') ,...
@@ -1226,6 +1228,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('node_plus')   ,RequiredWordSyntax('node_minus')   ,...
@@ -1239,6 +1242,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
 
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('node_plus'),RequiredWordSyntax('node_minus')   ,...
@@ -1251,6 +1255,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('node_plus')   ,RequiredWordSyntax('node_minus')   ,...
@@ -1264,6 +1269,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
 
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('node_plus'),RequiredWordSyntax('node_minus')   ,...
@@ -1276,6 +1282,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
 
       dc_pattern = SyntaxProto();
       dc_pattern.name = 'DC';
@@ -1286,12 +1293,11 @@ classdef SpiceParser < handle
       ac_pattern.name = 'AC';
       ac_pattern.required_min = 0;
       ac_pattern.syntax_pattern = ['AC',RequiredValueSyntax('magnitude'),OptionalValueSyntax('phase')];
-
-      %TODO transient specification
-
+      
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('node_plus') ,RequiredWordSyntax('node_minus') ,...
-        {dc_pattern},{ac_pattern}];
+        {dc_pattern},{ac_pattern},{transient_syntax}];
+      out(type_info.type) = syntax;
       
       %%%%%%%%%%
       %'Jfet'             , int64('J'),... %J<name> <drain node> <gate node> <source node> <model name> [area value]
@@ -1299,6 +1305,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern, ...
         RequiredWordSyntax('drain'), RequiredWordSyntax('gate'), RequiredWordSyntax('source'), ...
@@ -1311,6 +1318,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('node_plus'),RequiredWordSyntax('node_minus'),...
@@ -1324,7 +1332,26 @@ classdef SpiceParser < handle
 %       ...  %K<name> <L<inductor name>>* <coupling value> <model name> [size value]
 %       ... %TransmissionLine Coupling K TT
 %       ...  %K<name> T<line name> <T<line name>>* CM=<coupling capacitance> LM=<coupling inductance>
-%       'Mosfet'           , int64('M'),...
+        
+        %%%%%%%%%%
+        %'Mosfet'           , int64('M'),... %M<name> <drain node> <gate node> <source node> + <bulk/substrate node> <model name>
+        type_val = DeclarationType.Mosfet;
+        type_info = DeclarationTypeInfoMap(type_val);
+        syntax = SyntaxProto();
+        syntax.name = type_info.name;
+        syntax.key  = type_info.type;
+        
+        named_values = {'L','W','AD','AS','PD','PS','NRD','NRS','NRG','NRB','M','N'};
+        named_value_syntax = cellfun(@(c)OptionalNamedValueSyntax(s),named_values,'Un',0);
+        
+        syntax.pattern = [syntax.pattern,...
+          RequiredWordSyntax('Drain'),RequiredWordSyntax('Gate'),...
+          RequiredWordSyntax('Source'),RequiredSubstratedNode('Substrate'),...
+          RequiredWordSyntax('model_name'),{named_value_syntax}];
+        out(type_info.type)+=1;
+        %%%%#%%%%%
+          
+        
 %       'DigitalInput'     , int64('N'),... %N<name> <interface node> <low level node> <high level node> <model name> <input specification>
 %       'DigitalOutput'    , int64('O'),... %O<name> <interface node> <low level node> <high level node> <model name> <output specification>
 %       'Bjt', int64('Q'),... %Q<name> <collector node> <base node> <emitter node> [substrate node] <model name> [area value]
@@ -1335,6 +1362,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       quadratic_coeff = SyntaxProto();
       quadratic_coeff.name = 'optinal_quadratic_temperature_coefficent';
@@ -1346,7 +1374,7 @@ classdef SpiceParser < handle
       tc_syntax.name = 'temperature_coefficient';
       tc_syntax.pattern = {'TC',SyntaxPattern.Equality,quadratic_coeff};
       
-      syntax.pattern = [syntax.pattern,pm_nodes_required, ...
+      syntax.pattern = [syntax.pattern,RequiredWordSyntax('node_plus'),RequiredWordSyntax('node_minus'), ...
         OptionalWordSyntax('model_name'),RequiredValueSyntax('value'),{tc_syntax}];
       out(type_info.type) = syntax;
       
@@ -1356,6 +1384,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('switch_plus') ,RequiredWordSyntax('switch_minus') ,...
@@ -1369,6 +1398,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('port_a_plus'),RequiredWordSyntax('port_a_minus') ,...
@@ -1376,9 +1406,17 @@ classdef SpiceParser < handle
         RequiredWordSyntax('ideal_or_lossy_specification')];
       out(type_info.type) = syntax;
       
-%       'DigitalPrimitive' , int64('U'),...
-%       ...% U<name> <primitive type> ([parameter value]*) <digital power node> <digital ground node> <node>* <timing model name>
-%       ...% U<name> STIM (<width value>, <format value>) <digital power node> <digital ground node> <node>* <I/O model name> [TIMESTEP=<stepsize value>] <waveform description>
+      %%%%%%%%%%
+      %'DigitalPrimitive' , int64('U'),...
+      %...% U<name> <primitive type> ([parameter value]*) <digital power node> <digital ground node> <node>* <timing model name>
+      %...% U<name> STIM (<width value>, <format value>) <digital power node> <digital ground node> <node>* <I/O model name> [TIMESTEP=<stepsize value>] <waveform description>
+      %TODO fully support parsing Digital primitives, for now there are way too many types
+      type_val = DeclarationType.VSource;
+      type_info = DeclarationTypeInfoMap(type_val);
+      syntax = SyntaxProto();
+      syntax.name = type_info.name;
+      syntax.key  = type_info.type;
+      out(type_info.type) = syntax;
       
       %%%%%%%%%%
       %'VSource'          , int64('V'),... %V<name> <+ node> <- node> [[DC] <value>] [AC <magnitude value> [phase value]] [transient specification]
@@ -1386,6 +1424,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       dc_pattern = SyntaxProto();
       dc_pattern.name = 'DC';
@@ -1397,11 +1436,10 @@ classdef SpiceParser < handle
       ac_pattern.required_min = 0;
       ac_pattern.syntax_pattern = ['AC',RequiredValueSyntax('magnitude'),OptionalValueSyntax('phase')];
       
-      %TODO transient specification
-      
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('node_plus') ,RequiredWordSyntax('node_minus') ,...
-        {dc_pattern},{ac_pattern}];
+        {dc_pattern},{ac_pattern},{transient_syntax}];
+      out(type_info.type) = syntax;
       
       %%%%%%%%%%
       %'IcSwitch'         , int64('W'),... %W<name> <+ switch node> <- switch node> <controlling V device name> <model name>
@@ -1409,13 +1447,38 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       syntax.pattern = [syntax.pattern,...
         RequiredWordSyntax('switch_plus') ,RequiredWordSyntax('switch_minus') ,...
         RequiredWordSyntax('control_V_device'),RequiredWordSyntax('model_name')];
       out(type_info.type) = syntax;
       
-%'Subcircuit'       , int64('X'),... %X<name> [node]* <subcircuit name> [PARAMS: <<name>=<value>>*] [TEXT:<<name>=<text value>>*]
+      %%%%%%%%%%
+      %'Subcircuit'       , int64('X'),... %X<name> [node]* <subcircuit name> [PARAMS: <<name>=<value>>*] [TEXT:<<name>=<text value>>*]
+      type_val = DeclarationType.Subcircuit;
+      type_info = DeclarationTypeInfoMap(type_val);
+      syntax = SyntaxProto();
+      syntax.name = type_info.name;
+      syntax.key  = type_info.type;
+      
+      named_parameter_list = RequiredNamedValueSyntax('name');
+      named_parameter_list.required_max = inf;
+      
+      param_list = SyntaxProto();
+      param_list.required_min = 0;
+      param_list.pattern = {'params',SyntaxPattern.ParameterListBegin,named_parameter_list};
+      
+      text_list = SyntaxProto();
+      text_list.required_min = 0;
+      text_list.pattern = {'text',SyntaxPattern.ParameterListBegin,named_parameter_list};
+      
+      node_list = RequiredWordSyntax('node');
+      node_list.required_max = inf;
+      
+      syntax.pattern = [syntax.pattern,...
+        {node_list},RequiredWordSyntax('subcircuit_name'),{param_list},{text_list}];
+      out(type_info.type) = syntax;
       
       %%%%%%%%%%
       %'Igbt'             , int64('Z'),... %Z<name> <collector> <gate> <emitter> <model name> [AREA=<value>] [WB=<value>] [AGD=<value>] [KP=<value>] [TAU=<value>]
@@ -1423,6 +1486,7 @@ classdef SpiceParser < handle
       type_info = DeclarationTypeInfoMap(type_val);
       syntax = SyntaxProto();
       syntax.name = type_info.name;
+      syntax.key  = type_info.type;
       
       bjt_values = SyntaxProto();
       bjt_values.name = 'values';
