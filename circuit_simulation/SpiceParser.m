@@ -60,15 +60,13 @@ classdef SpiceParser < handle
       'Capacitor' ,13,...
       'Inductor'  ,14 ...
     );
-    DeclarationMap = SpiceParser.getDeclarationMap();
-    DeclarationKeys = SpiceParser.DeclarationMap.keys;
-    SupportedDeclarationMap = SpiceParser.getSupportedDeclarationMap();
+    DeclarationTypeMap = SpiceParser.getDeclarationTypeMap();
+    
+    DeclarationTypeInfoProto = @()struct('type',[],'name',[],'key',[],'meta_type',[],'supported',false);
+    DeclarationTypeInfoMap = SpiceParser.getDeclarationTypeInfoMap();
+
     DeclarationProto = @()struct('type',[],'directive_type',[],'tokens',[]);
     EmptyDeclaration = aindex(SpiceParser.DeclarationProto(),[]);
-    
-    DeclarationTypeInfoProto = @()struct('type',[],'name',[],'key',[],'meta_type',[],'supported',false)	;
-    DeclarationTypeInfoMap = SpiceParser.getDeclarationTypeInfoProto();
-    
     % /Declaration Information
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
@@ -386,15 +384,15 @@ classdef SpiceParser < handle
       warnings = SpiceParser.EmptyError;
       
       DeclarationType = SpiceParser.DeclarationType;
-      DeclarationKeys = SpiceParser.DeclarationKeys;
+      DeclarationKeys = SpiceParser.DeclarationTypeMap.keys;
       DeclarationPrefix = '^';
       DeclarationKeyPatterns = cellfun(@(s)[DeclarationPrefix s],DeclarationKeys,'Un',0);
-      DeclarationMap  = SpiceParser.DeclarationMap;
+      DeclarationTypeMap  = SpiceParser.DeclarationTypeMap;
       DeclarationProto = SpiceParser.DeclarationProto;
       
       DirectiveType = SpiceParser.DirectiveType;
       DirectiveTypeKeys = cs2cell(cflat(SpiceParser.DirectiveTypeInfoMap.values).key);
-      DirectivePrefix = [DeclarationPrefix DeclarationKeys{find(cflat(DeclarationMap.values)==DeclarationType.Directive,1,'first')}];
+      DirectivePrefix = [DeclarationPrefix DeclarationKeys{find(cflat(DeclarationTypeMap.values)==DeclarationType.Directive,1,'first')}];
       DirectiveTypeKeysPatterns = cellfun(@(s)[DirectivePrefix s '$'],DirectiveTypeKeys,'Un',0);
       DirectiveTypeMap  = SpiceParser.DirectiveTypeMap;
       DirectiveTypeInfoMap = SpiceParser.DirectiveTypeInfoMap;
@@ -413,7 +411,7 @@ classdef SpiceParser < handle
           continue;
         end
         
-        type = DeclarationMap(DeclarationKeys{idx});
+        type = DeclarationTypeMap(DeclarationKeys{idx});
         declaration = DeclarationProto();
         declaration.type = type;
         declaration.tokens = token_group;
@@ -515,7 +513,7 @@ classdef SpiceParser < handle
       end
       
       %If on subscircuit nesting errors and either .ENDS or SUBCKT is not supported, then remove the whole groupings
-      if( ~any_subscircuit_nesting_error && ~(SpiceParser.SupportedDeclarationMap(DeclarationType.SubCircuit) && SpiceParser.SupportedDirectiveTypeMap(DirectiveType.SubCircuitEnd)))
+      if( ~any_subscircuit_nesting_error && ~(SpiceParser.DeclarationTypeInfoMap(DeclarationType.SubCircuit).supported && SpiceParser.DeclarationTypeInfoMap(DeclarationType.SubCircuitEnd)))
         should_remove = zeros(size(declarations));
         in_subcircuit = false;
         subcircuit_indices = [];
@@ -548,8 +546,8 @@ classdef SpiceParser < handle
       directive_indices = find(arrayfun(@(decl)~isempty(decl.directive_type),declarations));
       directive_types = arrayfun(@(idx)declarations(idx).directive_type,directive_indices);
       unsupported_directives = directive_indices(~arrayfun(@(typ)DirectiveTypeInfoMap(typ).supported,directive_types));
-      for idx=1:numel(unsupported_directives)
-        idx = unsupported_directives(idx);
+      for i=1:numel(unsupported_directives)
+        idx = unsupported_directives(i);
         warning = SpiceParser.ErrorProto();
         warning.type = 'UnsupportedDirective';
         warning.line_number = declarations(idx).tokens(1).line_number;
@@ -561,10 +559,10 @@ classdef SpiceParser < handle
       
       %Remove all unsupported declarations and thrown warnings for each
       declaration_types = [declarations.type];
-      unsupported_declarations_lgc = ~arrayfun(@(typ)SpiceParser.SupportedDeclarationMap(typ),declaration_types);
+      unsupported_declarations_lgc = ~arrayfun(@(typ)SpiceParser.DeclarationTypeInfoMap(typ).supported,declaration_types);
       unsupported_declarations_idx = find(unsupported_declarations_lgc);
-      for idx=1:numel(unsupported_declarations_idx)
-        idx = unsupported_declarations_idx(idx);
+      for i=1:numel(unsupported_declarations_idx)
+        idx = unsupported_declarations_idx(i);
         warning = SpiceParser.ErrorProto();
         warning.type = 'UnsupportedDeclaration';
         warning.line_number = declarations(idx).tokens(1).line_number;
@@ -645,7 +643,7 @@ classdef SpiceParser < handle
     end
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Declaration Static Getters
-    function [out] = getDeclarationMap()
+    function [out] = getDeclarationTypeMap()
       out = containers.Map('KeyType','char','ValueType',SpiceParser.uid_type);
       DeclarationType = SpiceParser.DeclarationType;
       out('v'     ) = DeclarationType.VSource;
@@ -667,7 +665,11 @@ classdef SpiceParser < handle
     end
     function [out] = getDeclarationTypeInfoMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
+      %%%%%
       Type = SpiceParser.DeclarationType;
+      Map  = SpiceParser.DeclarationTypeMap;
+      InfoProto = SpiceParser.DirectiveTypeInfoProto;
+      %%%%%
       names = fieldnames(Type);
       typeval2name = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','char');
       for i = 1:numel(names)
@@ -675,40 +677,41 @@ classdef SpiceParser < handle
         typeval2name(Type.(name)) = name;
       end
       assert(typeval2name.Count==numel(fieldnames(Type)));
-      for key_c = Type.keys
+      for key_c = Map.keys
         key = key_c{1};
-        typeval = Type(key);
-        out(typeval) = SpiceParser.DirectiveTypeInfoProto();
+        typeval = Map(key);
+        out(typeval) = InfoProto();
         entry = out(typeval);
         entry.type = typeval;
         entry.key  = key;
         entry.name = typeval2name(typeval);
         out(typeval) = entry;
       end
+      %%%%%%
       metatype2types = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
       DeclarationMetaType = SpiceParser.DeclarationMetaType;
-      DeclarationType = SpiceParser.DeclarationType;
+      DeclarationType     = SpiceParser.DeclarationType;
       metatype2types(DeclarationMetaType.Component) = {...
-        DeclarationInfo.VSource   ,...
-				DeclarationInfo.ISource   ,...
-				DeclarationInfo.VcVSource ,...
-				DeclarationInfo.VcISource ,...
-				DeclarationInfo.IcVSource ,...
-				DeclarationInfo.IcISource ,...
-				DeclarationInfo.Diode     ,...
-				DeclarationInfo.BJT       ,...
-				DeclarationInfo.Mosfet    ,...
-				DeclarationInfo.User      ,...
-				DeclarationInfo.Resistor  ,...
-				DeclarationInfo.Capacitor ,...
-				DeclarationInfo.Inductor  ,...
-      	DeclarationInfo.SubCircuit ...%INVALID!
+        DeclarationType.VSource   ,...
+				DeclarationType.ISource   ,...
+				DeclarationType.VcVSource ,...
+				DeclarationType.VcISource ,...
+				DeclarationType.IcVSource ,...
+				DeclarationType.IcISource ,...
+				DeclarationType.Diode     ,...
+				DeclarationType.BJT       ,...
+				DeclarationType.Mosfet    ,...
+				DeclarationType.User      ,...
+				DeclarationType.Resistor  ,...
+				DeclarationType.Capacitor ,...
+				DeclarationType.Inductor  ,...
+      	DeclarationType.SubCircuit ...%INVALID!
     	};
       metatype2types(DeclarationMetaType.Directive) = {...
-      	DeclarationInfo.Directive ,...
+      	DeclarationType.Directive ,...
 			};
-      assert(metatype2types.Count==numel(fieldnames(DeclartionMetaType));
-      assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(Type)));
+      assert(metatype2types.Count==numel(fieldnames(DeclarationMetaType)));
+      assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(DeclarationType)));
       for key_c = metatype2types.keys
         metatype = key_c{1};
         for types_c = metatype2types(metatype)
@@ -718,7 +721,7 @@ classdef SpiceParser < handle
           out(type) = entry;
         end
       end
-      
+      %%%%%
       supported_types = [DeclarationType.Resistor ,...
 												 DeclarationType.Inductor ,...
 												 DeclarationType.Capacitor,...
@@ -728,9 +731,11 @@ classdef SpiceParser < handle
       for key = supported_types
       	entry = out(key);
       	entry.supported = true;
+        out(key) = entry;
       end
+      %%%%%
     end
-    
+    % /Declaration Static Getters
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -787,7 +792,11 @@ classdef SpiceParser < handle
     end
     function [out] = getDirectiveTypeInfoMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
+      %%%%%
       Type = SpiceParser.DirectiveType;
+      Map  = SpiceParser.DirectiveTypeMap;
+      InfoProto = SpiceParser.DirectiveTypeInfoProto;
+      %%%%%
       names = fieldnames(Type);
       typeval2name = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','char');
       for i = 1:numel(names)
@@ -795,19 +804,20 @@ classdef SpiceParser < handle
         typeval2name(Type.(name)) = name;
       end
       assert(typeval2name.Count==numel(fieldnames(Type)));
-      for key_c = Type.keys
+      for key_c = Map.keys
         key = key_c{1};
-        typeval = Type(key);
-        out(typeval) = SpiceParser.DirectiveTypeInfoProto();
+        typeval = Map(key);
+        out(typeval) = InfoProto();
         entry = out(typeval);
         entry.type = typeval;
         entry.key  = key;
         entry.name = typeval2name(typeval);
         out(typeval) = entry;
       end
+      %%%%%%
       metatype2types = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','Any');
       DirectiveMetaType = SpiceParser.DirectiveMetaType;
-      DirectiveType = SpiceParser.DirectiveType;
+      DirectiveType     = SpiceParser.DirectiveType;
       metatype2types(DirectiveMetaType.StandardAnalysis) = {...
         DirectiveType.AcAnalysis         ,...
         DirectiveType.DcAnalysis         ,...
@@ -862,7 +872,7 @@ classdef SpiceParser < handle
         DirectiveType.Text            ...
       };
       assert(metatype2types.Count==numel(fieldnames(DirectiveMetaType)));
-      assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(Type)));
+      assert(sum(cellfun(@numel,metatype2types.values))==numel(fieldnames(DirectiveType)));
       for key_c = metatype2types.keys
         metatype = key_c{1};
         for types_c = metatype2types(metatype)
@@ -872,9 +882,15 @@ classdef SpiceParser < handle
           out(type) = entry;
         end
       end
-      
-      out(DirectiveType.End) = true;
-      
+      %%%%%
+      supported_types = [DirectiveType.End ,...
+			];
+      for key = supported_types
+      	entry = out(key);
+      	entry.supported = true;
+        out(key) = entry;
+      end
+      %%%%%
       DirectivePairingType = SpiceParser.DirectivePairingType;
       entry = out(DirectiveType.SubCircuit   );
       entry.pairing_type = DirectivePairingType.Begin;
@@ -895,6 +911,7 @@ classdef SpiceParser < handle
       entry.pairing_type = DirectivePairingType.End  ;
       entry.reference_types(end+1) = DirectiveType.Aliases;
       out(DirectiveType.AliasesEnd) = entry;
+      %%%%%
     end
     % /Directive Static Getters
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -911,9 +928,9 @@ classdef SpiceParser < handle
       assert(out.Count==numel(fieldnames(ModelTypes)));
     end
     
-    function [out] = getSupportedDeclarationMap()
+    function [out] = getSupportedDeclarationTypeMap()
       out = containers.Map('KeyType',SpiceParser.uid_type,'ValueType','int64');
-      for key = cflat(SpiceParser.DeclarationMap.values)
+      for key = cflat(SpiceParser.DeclarationTypeMap.values)
         out(key) = 0;
       end
       out(SpiceParser.DeclarationType.Resistor)=1;
