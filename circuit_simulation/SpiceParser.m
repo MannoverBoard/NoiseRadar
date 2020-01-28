@@ -1,8 +1,8 @@
 classdef SpiceParser < handle
-  properties(Constant)%,Hidden)
+  properties(Constant,Hidden)
     uid_type = 'int64';
   end
-  properties(Constant)%,Hidden)
+  properties(Constant,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Error Definitions
     ErrorProto = @()struct('type',[],'line_number',[],'start',[],'message',[]);
@@ -13,7 +13,7 @@ classdef SpiceParser < handle
   end
   
   
-  properties(Constant)%,Hidden)
+  properties(Constant,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Line Definitions
     linebreak_pattern = '(\r?\n)';
@@ -24,7 +24,7 @@ classdef SpiceParser < handle
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end
   
-  properties(Constant)%,Hidden)
+  properties(Constant,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Token Definitions
     word_pattern = '[-a-zA-Z_0-9+.]+';
@@ -52,7 +52,7 @@ classdef SpiceParser < handle
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end
   
-  properties(Constant)%,Hidden)
+  properties(Constant,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     % Declaration Information
     DeclarationMetaType = struct(...
@@ -180,9 +180,9 @@ classdef SpiceParser < handle
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end
   
-  properties(Constant)%,Hidden)
+  properties(Constant,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    ComponentProto=@()struct('name',[],'values',[],'nodes',[],'parameters',containers.Map('KeyType','char','ValueType','any'));
+    ComponentProto=@()struct('type',[],'name',[],'nodes',[],'values',[],'named_values',containers.Map('KeyType','char','ValueType','any'));
     
     IndependentSourceTypes  = struct('Dc',0,'Ac',1);
     IndependentSourceTypesMap = SpiceParser.structToMap(SpiceParser.IndependentSourceTypes);
@@ -232,7 +232,7 @@ classdef SpiceParser < handle
     );
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end
-  properties(Constant)%,Hidden
+  properties(Constant,Hidden)
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     TransientType = struct(...
       'Exponential'        , 0,...
@@ -607,12 +607,17 @@ classdef SpiceParser < handle
       end
       declarations = declarations(~unsupported_declarations_lgc);
     end
+    
+    function [declarations,directives,errors,warnings] = validateDeclarations(declarations)
+      
+      
+    end
   end
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   % Utitity Functions
-  methods(Static)%,Hidden)
+  methods(Static,Hidden)
     function [Y] = esc(X)
       if nargin<1
         Y = '';
@@ -659,13 +664,14 @@ classdef SpiceParser < handle
         out(typeval) = entry;
       end
     end
+    
   end
   % /Utitity Functions
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   % Static Getters
-  methods(Static)%,Hidden)
+  methods(Static,Hidden)
     function [out] = getValuesSuffixMap()
       out = containers.Map('KeyType','char','ValueType','double');
       out('f')     = 1e-15;
@@ -1117,7 +1123,7 @@ classdef SpiceParser < handle
     end
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   end
-  properties(Constant)%,Hidden)
+  properties(Constant,Hidden)
     ValueSuffixMap = SpiceParser.getValuesSuffixMap();
     ValuePattern = ['([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)(' ...
       strjoin(cellfun(@SpiceParser.esc,removeEmpties(SpiceParser.ValueSuffixMap.keys),'Un',0),'|') ')?'];
@@ -1462,7 +1468,7 @@ classdef SpiceParser < handle
       
       parameter_list = Word('parameter_list');
       parameter_list.pattern = {SyntaxPattern.ListBegin,Value('parameter',1,inf),SyntaxPattern.ListEnd};
-      primitive_pattern.pattern = {Word('primitive_type'),parameter_list,Word('node_power'),Word('node_ground'),Word('nodes',1,inf),Word('timing_model_name')};
+      primitive_pattern = {Word('primitive_type'),parameter_list,Word('node_power'),Word('node_ground'),Word('nodes',1,inf),Word('timing_model_name')};
       
       stimulus_pattern = {'STIM',SyntaxPattern.ListBegin,Value('width'),SyntaxPattern.CommaSeparator,Value('value'),SyntaxPattern.ListEnd,...
         Word('node_power'),Word('node_ground'),Word('nodes',1,inf),Word('io_model_name'),NamedValue('TIMESTEP',0),Word('waveform_description',0)};
@@ -1555,49 +1561,68 @@ classdef SpiceParser < handle
       for key_c = out.keys
         key = key_c{1};
         entry = out(key);
-        entry.regex = SpiceParser.regexFromSyntaxPattern(entry.pattern);
+        entry.regex = SpiceParser.regexFromSyntax(entry);
         out(key) = entry;
       end
-      
     end
   end
   % /Static Getters
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   methods(Static)
-    function [regx] = regexFromSyntaxPattern(pattern)
+    function [regx] = regexFromSyntax(root_syntax)
+      if isempty(root_syntax.pattern)
+        regx = '';
+        return;
+      end
       stack = Deque();
-      stack.push(pattern)
-      out = {};
+      stack.push(root_syntax.pattern);
+      out = {'^'};
       while ~isempty(stack)
-        numel(stack.values)
-        context = stack.pop();
-        if isempty(context)
+        pop = stack.pop();
+        if isempty(pop)
           continue;
         end
-        broke_out = false;
-        for i=1:numel(context)
-          value = context{i};
-          if ischar(value)
-            if i==1
-              value = ['(' value ]; %#ok<AGROW>
+        if ischar(pop)
+          out{end+1} = pop; %#ok<AGROW>
+        elseif isstruct(pop)
+          syntax = pop;
+          if syntax.choices
+            context = {};
+            N = numel(syntax.pattern);
+            for i=1:N
+              if i<N
+                context = [context,syntax.pattern(i),{'|'}]; %#ok<AGROW>
+              end
             end
-            out{end+1} = value; %#ok<AGROW>
           else
-            stack.push(context(i+1:end));
-            if isstruct(value)
-              stack.push(context{i}.pattern)
-            else
-              stack.push(value);
-            end
-            broke_out = true;
-            break;
+            context = syntax.pattern;
           end
-        end
-        if ~broke_out
-          out{end} = [out{end} ')'];
+          has_name = ~isempty(syntax.name);
+          assert(syntax.required_min<=syntax.required_max);
+          assert(syntax.required_min>=0);
+          multiplicity = (syntax.required_min~=1 || syntax.required_max~=1);
+          if has_name || multiplicity
+            if has_name
+              context  = [{['?<' syntax.name '>']},context]; %#ok<AGROW>
+            end
+            context = [{'('},context,{' +)'}]; %#ok<AGROW>
+            if multiplicity
+              context = [context,{'{' num2str(syntax.required_min), ',', tern(syntax.required_max==inf,'',@()num2str(syntax.required_max)) '}'}]; %#ok<AGROW>
+            end
+          end
+          for i=numel(context):-1:1
+            stack.push(context{i});
+          end
+        elseif iscell(pop)
+          for i=numel(pop):-1:1
+            stack.push(pop{i});
+          end
+        else
+          warning('Other type present while parsing syntax');
+          disp(pop);
         end
       end
-      regx = strjoin(out,' ');
+      regx = strjoin(out,'');
     end
   end
  
