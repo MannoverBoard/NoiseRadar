@@ -9,7 +9,7 @@ function [out] = tern(sw,tr,fs)
     if isa(fs,'function_handle')
       out = fs();
     else
-      out = fs();
+      out = fs;
     end
   end
 end
