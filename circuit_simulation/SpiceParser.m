@@ -1550,6 +1550,15 @@ classdef SpiceParser < handle
       out(type_info.type) = syntax;
       
       assert(out.Count==DeclarationTypeInfoMap.Count);
+      
+      %%%%%%%%%%
+      for key_c = out.keys
+        key = key_c{1};
+        entry = out(key);
+        entry.regex = SpiceParser.regexFromSyntaxPattern(entry.pattern);
+        out(key) = entry;
+      end
+      
     end
   end
   % /Static Getters
