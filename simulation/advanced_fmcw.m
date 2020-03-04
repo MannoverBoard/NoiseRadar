@@ -130,13 +130,6 @@ end
 
 %%%%%%%%%%%%%%%%%%
 % Object Prototypes
-function [out] = AreaRegionProto()
-  out = struct(...
-    'DR_width',[],...
-    'CR_width',[] ...
-  );
-end
-
 function [out] = PlatformProto()
   out = struct(...
     'orientation',@(t)repmat(eye(3),[1,1,length(t)]),...
@@ -168,31 +161,6 @@ function [out] = TargetProto()
   );
 end
 
-function [out] = SarCellProto()
-  out = struct(...
-    'dim' ,AreaRegionProto(),...
-    'prec',AreaRegionProto(),...
-    'plat',PlatformProto()   ...
-  );
-  out.getCorners = @(cell,t)reshape(...
-    [+cell.dim.DR_width;+cell.dim.CR_width;0;...
-     +cell.dim.DR_width;-cell.dim.CR_width;0;...
-     -cell.dim.DR_width;+cell.dim.CR_width;0;...
-     -cell.dim.DR_width;-cell.dim.CR_width;0]/2 ...
-     +repmat(cell.plat.position(t),4,1),3,4,length(t));
-end
-
-function [out] = SarProto()
-  out = struct(...
-    'cell',SarCellProto(),...
-    'start_time' ,[], ...
-    'flight_time',[] ...
-  );
-  out.timeLinspace = @(sar_info,N) sar_info.start_time+linspace(0,sar_info.flight_time,N);
-  out.timeSampled = @(sar_info,Ts) sar_info.start_time + ...
-    sar_info.flight_time/2+(-sar_info.flight_time/2:Ts:sar_info.flight_time/2);
-end
-
 function [gain] = isotropic(fc,az,el)
   gain = 1+0*fc.*az.*el;
 end
@@ -201,28 +169,6 @@ function [f_pattern] = genGaussianBand(f0,B)
   %produces gain pattern centered at f0 with bandwidth B, height 1
   S = -1/(2*B^2);
   f_pattern = @(f)exp(S*(f-f0).^2);
-end
-
-function [f_pattern] = genColoredBand(r,g,b)
-  BW = .75e9/2;
-  f0s = [ RED_FREQ(), GREEN_FREQ(), BLUE_FREQ()];
-  patterns = cell(1,3);
-  for i=1:length(f0s)
-    patterns{i} =  genGaussianBand(f0s(i),BW);
-  end
-  weights = [r,g,b];
-  weights = weights/sum(weights);%normalize sum to 1
-  
-  r_w = weights(1);
-  r_p = patterns{1};
-  
-  g_w = weights(2);
-  g_p = patterns{2};
-  
-  b_w = weights(3);
-  b_p = patterns{3};
-  
-  f_pattern = @(f)r_w*r_p(f)+ g_w*g_p(f)+ b_w*b_p(f);  
 end
 %%%%%%%%%%%%%%%%%%
 
@@ -241,15 +187,6 @@ end
 function [k] = BOLTZMANNS_CONSTANT()
   % Boltzmann's Constant (J/K)
   k = 1.38064852e-23;
-end
-function [f0] = RED_FREQ()
-  f0 = 9e9;
-end
-function [f0] = GREEN_FREQ()
-  f0 = 10e9;
-end
-function [f0] = BLUE_FREQ()
-  f0 = 11e9;
 end
 % /Physical Constants
 %%%%%%%%%%%%%%%%%%
@@ -274,9 +211,9 @@ function [varargout] = genTwoWayReturn(antenna,targets)
   r_ant = antenna.plat.position;
   r_tgts = arrayfun(@(tgt)tgt.plat.position,tgts,'Un',0);
   
-  r_rel = @(t)expand(cellfun(@(r_tgt)r_tgt(t)-r_ant(t),r_tgts,'Un',0));
+  r_rel = @(t)cflat(cellfun(@(r_tgt)r_tgt(t)-r_ant(t),r_tgts,'Un',0));
   R_rel = @(t)sqrt(sum(abs(r_rel(t)).^2,1));
-  sig = @(f,a,e)expand(arrayfun(@(n)tgts(n).sigma(f,a(n,:),e(n,:)),1:ntgt,'Un',0));
+  sig = @(f,a,e)cflat(arrayfun(@(n)tgts(n).sigma(f,a(n,:),e(n,:)),1:ntgt,'Un',0));
   sig = @(f,a,e)sig(f,reshape(a,[],ntgt).', reshape(e,[],ntgt).');
     
   vrx = @(vbb,t,ref_delay,tgt_delays)sum(reshape(...
@@ -290,7 +227,7 @@ function [varargout] = genTwoWayReturn(antenna,targets)
     ... %this is where the doppler shift comes in because this term includes fc
     ,[],ntgt),2).';
   
-  vrx = @(vbb,t0_tx,t,R_ref) vrx(vbb,t,getDelayFromRange(R_ref(t0_tx)),getDelayFromRange(R_rel(t0_tx+t)));
+  vrx = @(vbb,t0_tx,t,R_ref) vrx(vbb,t,getDelayFromRangeTwoWay(R_ref(t0_tx)),getDelayFromRangeTwoWay(R_rel(t0_tx+t)));
   %Vrx is the receive waveform back at baseband (downmixed by carrier)
   % t0 is the time offset of the center of the pulse
   % t is expected to be zero centered fast time,
@@ -312,21 +249,21 @@ function [Prx] = calculateTwoWayPrx(Ptx,G,fc,lambda,W_ant,r_rel,sigma)
    ((4*pi)^3*R.^4);
 end
 
-function [tau] = getDelayFromRange(R)
+function [tau] = getDelayFromRangeTwoWay(R)
   %Computes 2-way delay from a range
   tau = 2*R/SPEED_OF_LIGHT();
 end
 
-function [R] = getRangeFromDelay(tau)
+function [R] = getRangeFromDelayTwoWay(tau)
   %Computes 2-way range from a delay (time)
   R = SPEED_OF_LIGHT()/2*tau;
 end
 
-function [Rr] = rangeRateFromDoppler(fd,fc)
+function [Rr] = rangeRateFromDopplerTwoWay(fd,fc)
   Rr = -fd*(SPEED_OF_LIGHT()/(2*fc));
 end
 
-function [fd] = getRopplerFromRangeRate(Rr,fc)
+function [fd] = getRopplerFromRangeRateTwoWay(Rr,fc)
   fd = -2*Rr*fc/SPEED_OF_LIGHT();
 end
 %%%%%%%%%%%%%%%%%%
@@ -385,7 +322,7 @@ function [t,vbb,ranges,Vo] = genStretchProcessor(ant,range_extent,compensate_hs,
   carrier = ant.getCarrier(ant);
   
   % De-ramp system extra width
-  delta_tau_R = getDelayFromRange(range_extent);
+  delta_tau_R = getDelayFromRangeTwoWay(range_extent);
     
   tau_h = tau_p + delta_tau_R;  
   Bh = Bt*tau_h/tau_p;%larger bandwidth because it runs for longer
@@ -403,7 +340,7 @@ function [t,vbb,ranges,Vo] = genStretchProcessor(ant,range_extent,compensate_hs,
   %Adds extra samples in FFT stage, does not actually increase resolution
   f = fs_BB/2*linspace(-1,1,Nif);    
   range_delays = f/alpha;
-  ranges = getRangeFromDelay(range_delays);
+  ranges = getRangeFromDelayTwoWay(range_delays);
   
   %check that max delta f can be captured by this fs_BB
   delta_f_R = alpha*delta_tau_R;
@@ -424,7 +361,7 @@ function [t,vbb,ranges,Vo] = genStretchProcessor(ant,range_extent,compensate_hs,
     conj(v_if(vrx,t0_tx,tau0,tau_hat)).*h_s(t,tau0,tau_hat);
   
   mixer = @(vrx,t0_tx,R_ref) ...
-    mixer(vrx,t0_tx,getDelayFromRange(R_ref(t0_tx)),getDelayFromRange(R_ref(t0_tx+t)));
+    mixer(vrx,t0_tx,getDelayFromRangeTwoWay(R_ref(t0_tx)),getDelayFromRangeTwoWay(R_ref(t0_tx+t)));
     
   Vo0 = Ts_BB;
   Vo = @(vrx,t0_tx,R_rel)fftshift(fft(mixer(vrx,t0_tx,R_rel),Nif))*Vo0;
@@ -521,7 +458,6 @@ function [r2] = tensorRotate(W,r)
   end
 end
 
-
 function [vel] = estimateVelocity(pos,time,dim)
   if nargin<3
     dim = 2;
@@ -549,8 +485,12 @@ end
 
 %%%%%%%%%%%%%%%%%%
 % Matlab Helper functions
-function [out] = expand(X)
+function [out] = cflat(X)
     out = [X{:}];
+end
+
+function [Y] = unroll(X)
+  Y = X(:);
 end
 
 function [cm] = radar_hud(N)
@@ -610,11 +550,6 @@ function [out] = isrow(v)
     out = isvec(v) && (sz(1)==1) && (sz(2)>1);
 end
 
-function [out] = iscol(v)
-    sz = size(v);
-    out = isvec(v) && (sz(1)>1) && (sz(2)==1);
-end
-
 function [out] = isemptyfield(S,field)
   out = isempty(S) || ~isfield(S,field) || isempty(S.(field));
 end
@@ -627,7 +562,7 @@ function [s]=vec2str(v)
     if isvec(v)
         if isrow(v)
             sep = ',';
-        elseif iscol(v)
+        elseif iscolumn(v)
             sep = ';';
         end
         s = ['[',strjoin(arrayfun(@num2str,v,'Un',0),sep),']'];
@@ -652,10 +587,6 @@ function [varargout] = minmax(varargin)
   else
     varargout = [out1(:).',out2(:)];
   end
-end
-
-function [Y] = unroll(X)
-  Y = X(:);
 end
 % /Matlab Helper functions
 %%%%%%%%%%%%%%%%%%
@@ -699,7 +630,7 @@ function [Ts,slow_t,cross_ranges,edge_ranges,center_ranges] = calculateSarCrossr
   %calculates maximum doppler using tangent speed of furthest point
   %relative to center divided by down range to center
   max_rr = (sar_info.cell.dim.CR_width/2*avg_speed/DR_min);
-  max_fd = abs(getRopplerFromRangeRate(max_rr,ant.fc));
+  max_fd = abs(getRopplerFromRangeRateTwoWay(max_rr,ant.fc));
   min_fs = 2*max_fd;
   max_Ts = 1/min_fs;
   
@@ -772,7 +703,7 @@ function [ranges,cross_ranges,data,image] = generateSarImage(ant,tgts,sar_info,c
   end
     
   tau_width = max(tau(:))-min(tau(:));
-  approx_delay_correction_jitter = 2*getDelayFromRange(getRange(...
+  approx_delay_correction_jitter = 2*getDelayFromRangeTwoWay(getRange(...
     ant.plat.position(sar_info.start_time)-sar_info.cell.plat.position(sar_info.start_time)));
   if(tau_width+approx_delay_correction_jitter>=slow_Ts)
     error(['Fast time window plus delay correction jitter is larger than slow time sampling rate. '...
